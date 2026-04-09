@@ -10,10 +10,7 @@ export function LoginPage() {
     const { login, isAuthenticated } = useAuth();
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
 
-    // ✅ Redirect nếu đã login
     useEffect(() => {
         if (isAuthenticated) {
             navigate('/dashboard', { replace: true });
@@ -46,7 +43,7 @@ export function LoginPage() {
                     data.data.token
                 );
 
-                navigate('/dashboard'); // ✅ chuyển trang
+                navigate('/dashboard'); 
             } else {
                 setError(data.message || 'Sai tài khoản hoặc mật khẩu');
             }

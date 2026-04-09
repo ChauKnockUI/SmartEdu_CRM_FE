@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Form, Input, Button, Card, Alert, Select, Row, Col } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined, PhoneOutlined, UserAddOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
@@ -12,7 +12,7 @@ export function RegisterPage() {
   const { login, isAuthenticated } = useAuth();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-
+  const [roleRegistered, setRoleRegistered] = useState('');
   // Redirect if already logged in
   useEffect(() => {
     if (isAuthenticated) {
@@ -21,27 +21,59 @@ export function RegisterPage() {
   }, [isAuthenticated, navigate]);
 
   const handleRegister = async (values: any) => {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Mock successful registration
-    setSuccess(true);
-
-    // Auto login after 1.5 seconds
-    setTimeout(() => {
-      login({
-        id: values.email,
-        name: values.name,
-        email: values.email,
-        role: values.role,
-        avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(values.name)}`,
+      const res = await fetch('http://localhost:3000/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: values.email,
+          password: values.password,
+          full_name: values.name,
+          phone: values.phone,
+          role: values.role,
+        }),
       });
-      navigate('/dashboard');
-    }, 1500);
 
-    setLoading(false);
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || 'Đăng ký thất bại');
+      }
+
+      // STUDENT → LOGIN LUÔN
+      if (values.role === 'student') {
+        login(
+          {
+            id: values.email,
+            name: values.name,
+            email: values.email,
+            role: values.role,
+            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(values.name)}`,
+          },
+          'mock_token'
+        );
+
+        setRoleRegistered(values.role);
+        navigate('/dashboard');
+        return;
+      }
+
+      // TEACHER / SALE → CHỜ DUYỆT
+      setSuccess(true);
+
+      setTimeout(() => {
+        navigate('/login');
+      }, 2000);
+
+    } catch (err: any) {
+      console.error(err);
+      setSuccess(false);
+      alert(err.message || 'Có lỗi xảy ra');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -65,10 +97,13 @@ export function RegisterPage() {
           {success ? (
             <Alert
               message="Đăng ký thành công!"
-              description="Tài khoản của bạn đã được tạo. Đang chuyển hướng..."
+              description={
+                roleRegistered === 'student'
+                  ? 'Đang đăng nhập...'
+                  : 'Tài khoản của bạn đang chờ admin duyệt.'
+              }
               type="success"
               showIcon
-              className="mb-4"
             />
           ) : null}
 
@@ -107,6 +142,7 @@ export function RegisterPage() {
                   <Select placeholder="Chọn loại tài khoản">
                     <Option value="student">Học viên</Option>
                     <Option value="teacher">Giảng viên</Option>
+                    <Option value="sale">Tư vấn</Option>
                   </Select>
                 </Form.Item>
               </Col>
@@ -198,8 +234,8 @@ export function RegisterPage() {
 
             <div className="text-center">
               <span className="text-gray-600">Đã có tài khoản? </span>
-              <a 
-                href="/login" 
+              <a
+                href="/login"
                 className="text-blue-600 hover:text-blue-700 font-medium"
                 onClick={(e) => {
                   e.preventDefault();

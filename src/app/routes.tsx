@@ -19,12 +19,18 @@ import { AIInsightsPage } from '../features/ai/AIInsightsPage';
 import { UsersPage } from '../features/settings/UsersPage';
 import { LoginPage } from '../features/auth/loginPage';
 import { ProtectedRoute } from '../shared/components/ProtectedRoute';
+import { RegisterPage } from '@/features/auth/registerPage';
 
 export const router = createBrowserRouter([
   // ✅ PUBLIC ROUTE
   {
     path: '/login',
     element: <LoginPage />,
+  },
+
+  {
+    path: '/register',
+    element: <RegisterPage />,
   },
 
   // 🔒 PRIVATE ROUTE
