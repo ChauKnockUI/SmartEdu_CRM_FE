@@ -11,21 +11,13 @@ const getAuthHeader = () => {
 };
 
 export const leadService = {
-  // 🔥 GET ALL
   getAll: async (page = 1, limit = 10) => {
-    const res = await fetch(
-      `http://localhost:3000/api/leads?page=${page}&limit=${limit}`,
-      {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
-      }
-    );
-
+    const res = await fetch(`${config.baseURL}/leads?page=${page}&limit=${limit}`, {
+      headers: getAuthHeader(), 
+    });
     return res.json();
   },
-  
-  // 🔥 GET DETAIL
+
   getById: async (id: string) => {
     const res = await fetch(`${config.baseURL}/leads/${id}`, {
       headers: getAuthHeader(),
