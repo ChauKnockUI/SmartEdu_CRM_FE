@@ -3,6 +3,9 @@ import { Form, Input, Button, Card, Alert, Select, Row, Col } from 'antd';
 import { UserOutlined, LockOutlined, MailOutlined, PhoneOutlined, UserAddOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../shared/contexts/AuthContext';
+import { authService } from '@/services/api/auth.service';
+import { getRedirectPath } from '@/shared/utils/roleRedirect';
+import { message } from 'antd';
 
 const { Option } = Select;
 
@@ -21,60 +24,27 @@ export function RegisterPage() {
   }, [isAuthenticated, navigate]);
 
   const handleRegister = async (values: any) => {
-    try {
-      setLoading(true);
+  try {
+    setLoading(true);
 
-      const res = await fetch('http://localhost:3000/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: values.email,
-          password: values.password,
-          full_name: values.name,
-          phone: values.phone,
-          role: values.role,
-        }),
-      });
+    const res = await authService.register(values);
 
-      const data = await res.json();
+    const { user, token } = res.data;
 
-      if (!res.ok) {
-        throw new Error(data.message || 'Đăng ký thất bại');
-      }
-
-      // STUDENT → LOGIN LUÔN
-      if (values.role === 'student') {
-        login(
-          {
-            id: values.email,
-            name: values.name,
-            email: values.email,
-            role: values.role,
-            avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(values.name)}`,
-          },
-          'mock_token'
-        );
-
-        setRoleRegistered(values.role);
-        navigate('/dashboard');
-        return;
-      }
-
-      // TEACHER / SALE → CHỜ DUYỆT
-      setSuccess(true);
-
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
-
-    } catch (err: any) {
-      console.error(err);
-      setSuccess(false);
-      alert(err.message || 'Có lỗi xảy ra');
-    } finally {
-      setLoading(false);
+    if (token) {
+      login(user, token);
+      navigate(getRedirectPath(user.role));
+    } else {
+      message.success('Đăng ký thành công! Chờ admin duyệt tài khoản');
+      navigate('/login');
     }
-  };
+
+  } catch (err: any) {
+    message.error(err.message || 'Đăng ký thất bại');
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
@@ -118,7 +88,7 @@ export function RegisterPage() {
             <Row gutter={16}>
               <Col xs={24} sm={12}>
                 <Form.Item
-                  name="name"
+                  name="full_name"
                   label="Họ và tên"
                   rules={[
                     { required: true, message: 'Vui lòng nhập họ tên' },

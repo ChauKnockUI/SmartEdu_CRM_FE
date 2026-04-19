@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
+import { authService } from '@/services/api/auth.service';
 
 export type UserRole = 'admin' | 'sale' | 'teacher' | 'student';
 
@@ -26,67 +27,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // useEffect(() => {
-  //   const savedToken = localStorage.getItem('token');
-
-  //   if (!token) {
-  //     setLoading(false); // ✅ QUAN TRỌNG
-  //     return;
-  //   }
-
-  //   if (savedToken) {
-  //     setToken(savedToken);
-
-  //     // ✅ gọi API /me để lấy user
-  //     fetch('http://localhost:3000/api/auth/me', {
-  //       headers: {
-  //         Authorization: `Bearer ${savedToken}`,
-  //       },
-  //     })
-  //       .then(res => res.json())
-  //       .then(data => {
-  //         if (data?.data?.user) {
-  //           const u = data.data.user;
-
-  //           setUser({
-  //             id: u.id,
-  //             name: u.full_name,
-  //             email: u.email,
-  //             role: u.role,
-  //             avatar: u.avatar_url,
-  //           });
-  //         }
-  //       })
-  //       .catch(() => {
-  //         logout();
-  //       })
-  //       .finally(() => {
-  //         setLoading(false);
-  //       });
-  //   }
-  // }, []);
-  useEffect(() => {
-    const savedToken = localStorage.getItem('token');
-
-    if (savedToken) {
-      setToken(savedToken);
-    }
-
-    setLoading(false); // ✅ luôn tắt loading
-  }, []);
-
   const login = (user: User, token: string) => {
-    setUser(user);
-    setToken(token);
-    localStorage.setItem('token', token);
-  };
+  setUser(user);
+  setToken(token);
+  localStorage.setItem('token', token);
+};
 
-  // ✅ logout
-  const logout = () => {
+const logout = () => {
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');
   };
+
+  useEffect(() => {
+  const savedToken = localStorage.getItem('token');
+
+  if (!savedToken) {
+    setLoading(false);
+    return;
+  }
+
+  authService.getMe(savedToken)
+  .then((data) => {
+    const u = data.data.user;
+
+    setUser({
+      id: u.id,
+      name: u.full_name,
+      email: u.email,
+      role: u.role,
+    });
+
+    setToken(savedToken);
+  })
+  .catch(() => {
+    logout(); // 🔥 QUAN TRỌNG
+  })
+  .finally(() => setLoading(false));
+}, 
+[]);
+  
 
   return (
     <AuthContext.Provider
