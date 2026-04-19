@@ -6,14 +6,12 @@ import {
   UserAddOutlined,
   EditOutlined,
   PlusOutlined,
-  HistoryOutlined,
   TeamOutlined,
   CalendarOutlined,
   FileTextOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams, useNavigate } from 'react-router';
-import { mockLeads } from '../../services/mock/mockData';
 import type { LeadInteraction } from '../../shared/types';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { useAuth } from '../../shared/contexts/AuthContext';
