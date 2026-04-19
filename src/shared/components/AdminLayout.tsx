@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Avatar, Badge, Dropdown, Input, Button, Select, Space } from 'antd';
+import { Layout, Menu, Avatar, Badge, Dropdown, Input, Button, Select, MenuProps, Space } from 'antd';
 import {
   DashboardOutlined,
   UserOutlined,
@@ -20,7 +20,6 @@ import {
   QuestionCircleOutlined,
 } from '@ant-design/icons';
 import { Outlet, useNavigate, useLocation } from 'react-router';
-import type { MenuProps } from 'antd';
 import { mockNotifications } from '../../services/mock/mockData';
 import { useAuth } from '../contexts/AuthContext';
 import type { UserRole } from '../contexts/AuthContext';
@@ -145,10 +144,15 @@ export function AdminLayout() {
   const [guideVisible, setGuideVisible] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, switchRole } = useAuth();
+  const { user, switchRole, logout} = useAuth();
 
   const unreadCount = mockNotifications.filter(n => !n.is_read).length;
 
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+  
   const userMenuItems: MenuProps['items'] = [
     {
       key: 'profile',
@@ -169,6 +173,7 @@ export function AdminLayout() {
       icon: <LogoutOutlined />,
       label: 'Đăng xuất',
       danger: true,
+      onClick: handleLogout,
     },
   ];
 

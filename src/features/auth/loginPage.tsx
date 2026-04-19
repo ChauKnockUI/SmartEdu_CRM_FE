@@ -3,6 +3,8 @@ import { Form, Input, Button, Card, Checkbox, Alert } from 'antd';
 import { UserOutlined, LockOutlined, LoginOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../shared/contexts/AuthContext';
+import { getRedirectPath } from '@/shared/utils/roleRedirect';
+import { authService } from '@/services/api/auth.service';
 
 export function LoginPage() {
     const [form] = Form.useForm();
@@ -12,44 +14,32 @@ export function LoginPage() {
     const [error, setError] = useState('');
 
     useEffect(() => {
-        if (isAuthenticated) {
-            navigate('/dashboard', { replace: true });
-        }
-    }, [isAuthenticated, navigate]);
+    if (isAuthenticated) {
+        navigate('/dashboard');
+    }
+    }, [isAuthenticated]);
 
-    const handleLogin = async (values: any) => {
-        const { email, password } = values;
+    type LoginForm = {
+        email: string;
+        password: string;
+    };
 
+    const handleLogin = async (values: LoginForm) => {
         try {
-            const res = await fetch('http://localhost:3000/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password }),
-            });
+            setLoading(true);
+            setError('');
 
-            const data = await res.json();
+            const res = await authService.login(values);
 
-            if (data.status === 'success') {
-                const u = data.data.user;
+            const { user, token } = res.data;
 
-                login(
-                    {
-                        id: String(u.id),
-                        name: u.full_name,
-                        email: u.email,
-                        role: u.role,
-                        avatar: u.avatar_url,
-                    },
-                    data.data.token
-                );
+            login(user, token);
 
-                navigate('/dashboard'); 
-            } else {
-                setError(data.message || 'Sai tài khoản hoặc mật khẩu');
-            }
-        } catch (err) {
-            console.error(err);
-            setError('Không kết nối được server');
+            navigate(getRedirectPath(user.role));
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setLoading(false);
         }
     };
 

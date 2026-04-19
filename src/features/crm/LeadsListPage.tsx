@@ -1,22 +1,28 @@
-import React, { useState } from 'react';
-import { Table, Tag, Button, Space, Select, DatePicker, Input, Drawer, Form, InputNumber, message } from 'antd';
+import React, { useEffect, useState } from 'react';
+import {
+  Table,
+  Tag,
+  Button,
+  Space,
+  Select,
+  DatePicker,
+  Input, Drawer, Form, message, Modal
+} from 'antd';
 import {
   PlusOutlined,
   PhoneOutlined,
   MessageOutlined,
   UserAddOutlined,
-  FilterOutlined,
-  ExportOutlined,
 } from '@ant-design/icons';
-import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
-import { mockLeads } from '../../services/mock/mockData';
-import type { Lead } from '../../shared/types';
 import { useNavigate } from 'react-router';
+import { leadService } from '@/services/api/lead.service';
+import { DeleteOutlined } from '@ant-design/icons';
+import { useAuth } from '@/shared/contexts/AuthContext';
 
 const { RangePicker } = DatePicker;
 
-const statusColors = {
+const statusColors: any = {
   new: 'blue',
   contacted: 'cyan',
   qualified: 'green',
@@ -24,7 +30,7 @@ const statusColors = {
   lost: 'default',
 };
 
-const statusLabels = {
+const statusLabels: any = {
   new: 'Mới',
   contacted: 'Đã liên hệ',
   qualified: 'Đủ điều kiện',
@@ -34,18 +40,102 @@ const statusLabels = {
 
 export function LeadsListPage() {
   const navigate = useNavigate();
-  const [leads, setLeads] = useState(mockLeads);
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [form] = Form.useForm();
+  const { user } = useAuth();
+  console.log('USER:', user);
 
-  const columns: ColumnsType<Lead> = [
+  const [leads, setLeads] = useState<any[]>([]);
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: 10,
+    total: 0,
+  });
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetchLeads(1);
+  }, []);
+
+  //get list lead
+  const fetchLeads = async (page: number) => {
+    try {
+      setLoading(true);
+
+      const res = await leadService.getAll(page, pagination.pageSize);
+
+      setLeads(res.data);
+      setPagination({
+        current: res.pagination.page,
+        pageSize: res.pagination.limit,
+        total: res.pagination.total,
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // create lead
+  const handleCreateLead = async (values: any) => {
+    try {
+      await leadService.create(values);
+
+      message.success('Tạo lead thành công');
+
+      setDrawerVisible(false);
+      form.resetFields();
+
+      fetchLeads(1);
+    } catch (err) {
+      console.error(err);
+      message.error('Tạo lead thất bại');
+    }
+  };
+
+  // delete lead
+  const handleDelete = (id: string) => {
+    Modal.confirm({
+      title: 'Xóa Lead?',
+      content: 'Bạn có chắc muốn xóa lead này không?',
+      okText: 'Xóa',
+      okType: 'danger',
+      cancelText: 'Hủy',
+
+      onOk: async () => {
+        try {
+          await leadService.remove(id);
+
+          message.success('Đã xóa lead');
+
+          fetchLeads(pagination.current);
+        } catch (err) {
+          console.error(err);
+          message.error('Xóa thất bại');
+        }
+      },
+    });
+  };
+
+  const getScore = (lead: any) =>
+    lead.aiScore?.probability_score ?? 0;
+
+  const getColor = (score: number) => {
+    if (score >= 80) return 'green';
+    if (score >= 60) return 'orange';
+    return 'red';
+  };
+
+  const columns = [
     {
       title: 'Tên',
-      dataIndex: 'name',
-      key: 'name',
-      sorter: (a, b) => a.name.localeCompare(b.name),
-      render: (name, record) => (
-        <a onClick={() => navigate(`/crm/leads/${record.id}`)} className="font-medium">
+      dataIndex: 'full_name',
+      render: (name: string, record: any) => (
+        <a
+          onClick={() => navigate(`/crm/leads/${record.id}`)}
+          className="font-medium"
+        >
           {name}
         </a>
       ),
@@ -53,116 +143,79 @@ export function LeadsListPage() {
     {
       title: 'Điện thoại',
       dataIndex: 'phone',
-      key: 'phone',
     },
     {
       title: 'Email',
       dataIndex: 'email',
-      key: 'email',
     },
     {
       title: 'Nguồn',
-      dataIndex: 'source',
-      key: 'source',
-      filters: [
-        { text: 'Facebook Ads', value: 'Facebook Ads', key: 'filter-facebook' },
-        { text: 'Google Ads', value: 'Google Ads', key: 'filter-google' },
-        { text: 'Website', value: 'Website', key: 'filter-website' },
-        { text: 'Referral', value: 'Referral', key: 'filter-referral' },
-      ],
-      onFilter: (value, record) => record.source === value,
+      dataIndex: 'lead_source',
     },
     {
       title: 'Trạng thái',
       dataIndex: 'status',
-      key: 'status',
-      filters: [
-        { text: 'Mới', value: 'new', key: 'filter-new' },
-        { text: 'Đã liên hệ', value: 'contacted', key: 'filter-contacted' },
-        { text: 'Đủ điều kiện', value: 'qualified', key: 'filter-qualified' },
-        { text: 'Đã chuyển đổi', value: 'converted', key: 'filter-converted' },
-        { text: 'Thất bại', value: 'lost', key: 'filter-lost' },
-      ],
-      onFilter: (value, record) => record.status === value,
-      render: (status: Lead['status']) => (
+      render: (status: string) => (
         <Tag color={statusColors[status]}>
-          {statusLabels[status]}
+          {statusLabels[status] || status}
         </Tag>
       ),
     },
     {
       title: 'Điểm AI',
-      dataIndex: 'score',
-      key: 'score',
-      sorter: (a, b) => a.score - b.score,
-      render: (score: number) => (
-        <span className={score >= 80 ? 'text-green-600 font-semibold' : score >= 60 ? 'text-orange-600' : 'text-red-600'}>
-          {score}
-        </span>
-      ),
+      render: (_: any, record: any) => {
+        const score = getScore(record);
+        return (
+          <span
+            className={
+              score >= 80
+                ? 'text-green-600 font-semibold'
+                : score >= 60
+                  ? 'text-orange-600'
+                  : 'text-red-600'
+            }
+          >
+            {score}
+          </span>
+        );
+      },
     },
     {
       title: 'Người phụ trách',
-      dataIndex: 'assignedTo',
-      key: 'assignedTo',
+      render: (_: any, record: any) =>
+        record.assignedUser?.full_name || 'Chưa có',
     },
     {
       title: 'Liên hệ gần nhất',
-      dataIndex: 'lastContactedAt',
-      key: 'lastContactedAt',
-      sorter: (a, b) => {
-        if (!a.lastContactedAt) return 1;
-        if (!b.lastContactedAt) return -1;
-        return a.lastContactedAt.getTime() - b.lastContactedAt.getTime();
-      },
-      render: (date?: Date) => date ? date.toLocaleDateString('vi-VN') : '-',
+      render: (_: any, record: any) =>
+        record.last_contacted
+          ? new Date(record.last_contacted).toLocaleDateString('vi-VN')
+          : '-',
     },
     {
       title: 'Hành động',
-      key: 'actions',
-      render: (_, record) => (
+      render: (_: any, record: any) => (
         <Space size="small">
-          <Button
-            type="text"
-            icon={<PhoneOutlined />}
-            size="small"
-            title="Gọi điện"
-          />
-          <Button
-            type="text"
-            icon={<MessageOutlined />}
-            size="small"
-            title="Nhắn tin"
-          />
+          <Button type="text" icon={<PhoneOutlined />} size="small" />
+          <Button type="text" icon={<MessageOutlined />} size="small" />
           <Button
             type="text"
             icon={<UserAddOutlined />}
             size="small"
-            title="Chuyển đổi"
             disabled={record.status === 'converted'}
           />
+          {user?.role === 'admin' || user?.role === 'sale' ? (
+          <Button
+            danger
+            type="text"
+            icon={<DeleteOutlined />}
+            onClick={() => handleDelete(record.id)}
+          />
+          ) : null}
         </Space>
       ),
     },
   ];
-
-  const handleCreateLead = (values: any) => {
-    const newLead: Lead = {
-      id: `lead-${Date.now()}`,
-      name: values.name,
-      phone: values.phone,
-      email: values.email,
-      source: values.source,
-      status: 'new',
-      score: values.score || 50,
-      assigned_to: values.assignedTo,
-      createdAt: new Date(),
-    };
-    setLeads([newLead, ...leads]);
-    message.success('Tạo lead thành công!');
-    setDrawerVisible(false);
-    form.resetFields();
-  };
 
   return (
     <div>
@@ -175,8 +228,11 @@ export function LeadsListPage() {
         ]}
         actions={
           <>
-            <Button icon={<ExportOutlined />}>Export</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setDrawerVisible(true)}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setDrawerVisible(true)}
+            >
               Thêm Lead
             </Button>
           </>
@@ -184,147 +240,112 @@ export function LeadsListPage() {
       />
 
       <div className="bg-white p-6 rounded-lg shadow-sm">
-        {/* Filters */}
+        {/* Filters (UI giữ nguyên) */}
         <div className="mb-4 flex flex-wrap gap-3">
-          <Select
-            placeholder="Lọc theo trạng thái"
-            style={{ width: 180 }}
-            allowClear
-            options={[
-              { label: 'Mới', value: 'new' },
-              { label: 'Đã liên hệ', value: 'contacted' },
-              { label: 'Đủ điều kiện', value: 'qualified' },
-              { label: 'Đã chuyển đổi', value: 'converted' },
-              { label: 'Thất bại', value: 'lost' },
-            ]}
-          />
-          <Select
-            placeholder="Lọc theo nguồn"
-            style={{ width: 180 }}
-            allowClear
-            options={[
-              { label: 'Facebook Ads', value: 'facebook' },
-              { label: 'Google Ads', value: 'google' },
-              { label: 'Website', value: 'website' },
-              { label: 'Referral', value: 'referral' },
-            ]}
-          />
-          <Select
-            placeholder="Người phụ trách"
-            style={{ width: 180 }}
-            allowClear
-            options={[
-              { label: 'Sale 1', value: 'sale1' },
-              { label: 'Sale 2', value: 'sale2' },
-              { label: 'Sale 3', value: 'sale3' },
-            ]}
-          />
-          <RangePicker placeholder={['Từ ngày', 'Đến ngày']} />
+          <Select placeholder="Lọc theo trạng thái" style={{ width: 180 }} allowClear />
+          <Select placeholder="Lọc theo nguồn" style={{ width: 180 }} allowClear />
+          <Select placeholder="Người phụ trách" style={{ width: 180 }} allowClear />
+          <RangePicker />
           <Input.Search placeholder="Tìm kiếm..." style={{ width: 250 }} />
         </div>
 
         <Table
+          rowKey="id"
           columns={columns}
           dataSource={leads}
-          rowKey="id"
+          loading={loading}
           pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
+            current: pagination.current,
+            pageSize: pagination.pageSize,
+            total: pagination.total,
+            onChange: (page) => fetchLeads(page),
             showTotal: (total) => `Tổng ${total} leads`,
           }}
         />
-      </div>
 
-      {/* Create Lead Drawer */}
-      <Drawer
-        title="Tạo Lead mới"
-        width={600}
-        onClose={() => setDrawerVisible(false)}
-        open={drawerVisible}
-      >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleCreateLead}
+        <Drawer
+          title="Tạo Lead mới"
+          width={500}
+          onClose={() => setDrawerVisible(false)}
+          open={drawerVisible}
         >
-          <Form.Item
-            name="name"
-            label="Tên"
-            rules={[{ required: true, message: 'Vui lòng nhập tên' }]}
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleCreateLead}
           >
-            <Input placeholder="Nhập tên lead" />
-          </Form.Item>
+            <Form.Item
+              name="full_name"
+              label="Tên"
+              rules={[{ required: true, message: 'Nhập tên' }]}
+            >
+              <Input placeholder="Nguyễn Văn A" />
+            </Form.Item>
 
-          <Form.Item
-            name="phone"
-            label="Điện thoại"
-            rules={[{ required: true, message: 'Vui lòng nhập số điện thoại' }]}
-          >
-            <Input placeholder="0912345678" />
-          </Form.Item>
+            <Form.Item
+              name="phone"
+              label="Số điện thoại"
+              rules={[{ required: true, message: 'Nhập SĐT' }]}
+            >
+              <Input placeholder="090xxxxxxx" />
+            </Form.Item>
 
-          <Form.Item
-            name="email"
-            label="Email"
-            rules={[
-              { required: true, message: 'Vui lòng nhập email' },
-              { type: 'email', message: 'Email không hợp lệ' },
-            ]}
-          >
-            <Input placeholder="email@example.com" />
-          </Form.Item>
+            <Form.Item
+              name="email"
+              label="Email"
+              rules={[{ type: 'email', message: 'Email không hợp lệ' }]}
+            >
+              <Input placeholder="email@gmail.com" />
+            </Form.Item>
 
-          <Form.Item
-            name="source"
-            label="Nguồn"
-            rules={[{ required: true, message: 'Vui lòng chọn nguồn' }]}
-          >
-            <Select
-              placeholder="Chọn nguồn lead"
-              options={[
-                { label: 'Facebook Ads', value: 'Facebook Ads' },
-                { label: 'Google Ads', value: 'Google Ads' },
-                { label: 'Website', value: 'Website' },
-                { label: 'Referral', value: 'Referral' },
-              ]}
-            />
-          </Form.Item>
+            <Form.Item
+              name="source"
+              label="Nguồn"
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={[
+                  { label: 'Facebook', value: 'facebook' },
+                  { label: 'Google Form', value: 'google form' },
+                  { label: 'Website', value: 'website' },
+                  { label: 'Referral', value: 'referral' },
+                ]}
+              />
+            </Form.Item>
 
-          <Form.Item
-            name="assignedTo"
-            label="Người phụ trách"
-            rules={[{ required: true, message: 'Vui lòng chọn người phụ trách' }]}
-          >
-            <Select
-              placeholder="Chọn người phụ trách"
-              options={[
-                { label: 'Sale 1', value: 'Sale 1' },
-                { label: 'Sale 2', value: 'Sale 2' },
-                { label: 'Sale 3', value: 'Sale 3' },
-              ]}
-            />
-          </Form.Item>
+            <Form.Item name="occupation" label="Nghề nghiệp">
+              <Select
+                options={[
+                  { label: 'Sinh viên năm 1-2', value: 'student_y1_y2' },
+                  { label: 'Sinh viên năm 3-4', value: 'student_y3_y4' },
+                  { label: 'Người đi làm', value: 'working_professional' },
+                ]}
+              />
+            </Form.Item>
 
-          <Form.Item
-            name="score"
-            label="Điểm ban đầu"
-            initialValue={50}
-          >
-            <InputNumber min={0} max={100} style={{ width: '100%' }} />
-          </Form.Item>
+            <Form.Item name="study_purpose" label="Mục tiêu học">
+              <Select
+                options={[
+                  { label: 'Du học', value: 'study_abroad' },
+                  { label: 'Công việc', value: 'career' },
+                  { label: 'Cải thiện tiếng Anh', value: 'improve' },
+                ]}
+              />
+            </Form.Item>
 
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit">
-                Tạo Lead
-              </Button>
-              <Button onClick={() => setDrawerVisible(false)}>
-                Hủy
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Drawer>
+            <Form.Item>
+              <Space>
+                <Button type="primary" htmlType="submit">
+                  Tạo Lead
+                </Button>
+                <Button onClick={() => setDrawerVisible(false)}>
+                  Hủy
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Drawer>
+      </div>
     </div>
   );
 }

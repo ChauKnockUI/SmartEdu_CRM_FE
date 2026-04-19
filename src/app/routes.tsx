@@ -59,8 +59,10 @@ export const router = createBrowserRouter([
                 element: <Navigate to="/crm/leads" replace />,
               },
               {
-                path: 'leads',
-                element: <LeadsListPage />,
+                element: <ProtectedRoute roles={['admin', 'sale']} />,
+                children: [
+                  { path: 'leads', element: <LeadsListPage /> },
+                ],
               },
               {
                 path: 'leads/:id',
