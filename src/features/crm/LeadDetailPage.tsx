@@ -45,6 +45,18 @@ const statusLabels: any = {
   lost: 'Thất bại',
 };
 
+const occupationLabels: any = {
+  student_y1_y2: 'Sinh viên năm 1-2',
+  student_y3_y4: 'Sinh viên năm 3-4',
+  working_professional: 'Người đi làm',
+};
+
+const studyPurposeLabels: any = {
+  study_abroad: 'Du học',
+  career: 'Công việc',
+  improve: 'Cải thiện tiếng Anh',
+};
+
 export function LeadDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -64,6 +76,7 @@ export function LeadDetailPage() {
       setLoading(true);
       const res = await leadService.getById(id as string);
       setLead(res.data);
+      console.log('LEAD DATA:', res.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -73,20 +86,22 @@ export function LeadDetailPage() {
 
   const openEdit = () => {
     form.setFieldsValue({
+      full_name: lead.full_name,
+      phone: lead.phone,
+      email: lead.email,
       source: lead.lead_source,
       occupation: lead.occupation,
       study_purpose: lead.study_purpose,
       status: lead.status,
       notes: lead.notes,
     });
-
     setEditVisible(true);
   };
 
   const handleUpdate = async (values: any) => {
     try {
       const { full_name, phone, email, ...allowedValues } = values;
-      await leadService.update(lead.id, allowedValues);
+      await leadService.update(String(lead.id), allowedValues);
 
       message.success('Cập nhật thành công');
       setEditVisible(false);
@@ -137,18 +152,29 @@ export function LeadDetailPage() {
                 {statusLabels[lead.status] || lead.status}
               </Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="Điện thoại">{lead.phone}</Descriptions.Item>
+
+            <Descriptions.Item label="Điện thoại">
+              {lead.phone || '-'}
+            </Descriptions.Item>
 
             <Descriptions.Item label="Email">
               {lead.email || '-'}
             </Descriptions.Item>
 
             <Descriptions.Item label="Nguồn">
-              {lead.lead_source}
+              {lead.lead_source || '-'}
             </Descriptions.Item>
 
             <Descriptions.Item label="Người phụ trách">
               {lead.assignedUser?.full_name || 'Chưa có'}
+            </Descriptions.Item>
+
+            <Descriptions.Item label="Nghề nghiệp">
+              {occupationLabels[lead.occupation] || lead.occupation || '-'}
+            </Descriptions.Item>
+
+            <Descriptions.Item label="Mục tiêu học">
+              {studyPurposeLabels[lead.study_purpose] || lead.study_purpose || '-'}
             </Descriptions.Item>
 
             <Descriptions.Item label="Ngày tạo">
@@ -160,6 +186,12 @@ export function LeadDetailPage() {
                 ? new Date(lead.last_contacted).toLocaleDateString('vi-VN')
                 : 'Chưa có'}
             </Descriptions.Item>
+
+            {lead.notes && (
+              <Descriptions.Item label="Ghi chú" span={2}>
+                {lead.notes}
+              </Descriptions.Item>
+            )}
           </Descriptions>
 
           {permissions.canViewLeadScore && (
@@ -181,13 +213,24 @@ export function LeadDetailPage() {
         label: 'Timeline',
         children: (
           <Card>
-            <Timeline
-              items={[
-                {
-                  children: 'Chưa có dữ liệu interaction (chưa nối API)',
-                },
-              ]}
-            />
+            {lead.activities?.length > 0 ? (
+              <Timeline
+                items={lead.activities.map((act: any) => ({
+                  children: (
+                    <div>
+                      <span className="font-medium">{act.type}</span>
+                      {act.content && <p className="text-gray-500 text-sm">{act.content}</p>}
+                      <p className="text-gray-400 text-xs">
+                        {new Date(act.createdAt).toLocaleString('vi-VN')}
+                        {act.user?.full_name && ` — ${act.user.full_name}`}
+                      </p>
+                    </div>
+                  ),
+                }))}
+              />
+            ) : (
+              <p className="text-gray-400">Chưa có hoạt động nào</p>
+            )}
           </Card>
         ),
       });
@@ -280,6 +323,7 @@ export function LeadDetailPage() {
           </Space>
         }
       />
+
       <Drawer
         title="Chỉnh sửa Lead"
         width={500}
@@ -291,17 +335,12 @@ export function LeadDetailPage() {
           layout="vertical"
           onFinish={handleUpdate}
         >
-          <Form.Item
-            name="full_name"
-            label="Tên"
-          >
+          {/* Chỉ xem, không edit */}
+          <Form.Item name="full_name" label="Tên">
             <Input disabled />
           </Form.Item>
 
-          <Form.Item
-            name="phone"
-            label="SĐT"
-          >
+          <Form.Item name="phone" label="SĐT">
             <Input disabled />
           </Form.Item>
 
@@ -309,12 +348,27 @@ export function LeadDetailPage() {
             <Input disabled />
           </Form.Item>
 
-          <Form.Item name="lead_source" label="Nguồn">
+          {/* Các field được phép edit — đúng tên backend nhận */}
+          <Form.Item name="status" label="Trạng thái">
+            <Select
+              options={[
+                { label: 'Mới', value: 'new' },
+                { label: 'Đã liên hệ', value: 'contacted' },
+                { label: 'Quan tâm', value: 'interested' },
+                { label: 'Học thử', value: 'trial' },
+                { label: 'Đã đăng ký', value: 'enrolled' },
+                { label: 'Thất bại', value: 'lost' },
+              ]}
+            />
+          </Form.Item>
+
+          <Form.Item name="source" label="Nguồn">
             <Select
               options={[
                 { label: 'Facebook', value: 'facebook' },
-                { label: 'Google Form', value: 'google form' },
+                { label: 'Google Form', value: 'google form' }, 
                 { label: 'Website', value: 'website' },
+                { label: 'Referral', value: 'referral' },
               ]}
             />
           </Form.Item>
@@ -334,7 +388,7 @@ export function LeadDetailPage() {
               options={[
                 { label: 'Du học', value: 'study_abroad' },
                 { label: 'Công việc', value: 'career' },
-                { label: 'Cải thiện', value: 'improve' },
+                { label: 'Cải thiện tiếng Anh', value: 'improve' },
               ]}
             />
           </Form.Item>
