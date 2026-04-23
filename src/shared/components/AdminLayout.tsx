@@ -53,6 +53,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
     getItem('LMS', '/lms', <BookOutlined />, [
       getItem('Học viên', '/lms/students', <TeamOutlined />),
       getItem('Giảng viên', '/lms/teachers', <ReadOutlined />),
+      getItem('Khóa học', '/lms/courses', <ReadOutlined />),
       getItem('Lớp học', '/lms/classes', <BookOutlined />),
       getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
     ]),
@@ -80,6 +81,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
         getItem('LMS', '/lms', <BookOutlined />, [
           getItem('Học viên', '/lms/students', <TeamOutlined />),
           getItem('Giảng viên', '/lms/teachers', <ReadOutlined />),
+          getItem('Khóa học', '/lms/courses', <ReadOutlined />),
           getItem('Lớp học', '/lms/classes', <BookOutlined />),
           getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
           getItem('Xếp lớp', '/lms/scheduling', <SwapOutlined />),
@@ -106,6 +108,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
         ]),
         getItem('LMS', '/lms', <BookOutlined />, [
           getItem('Học viên', '/lms/students', <TeamOutlined />),
+          getItem('Khóa học', '/lms/courses', <ReadOutlined />),
           getItem('Lớp học', '/lms/classes', <BookOutlined />),
           getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
         ]),

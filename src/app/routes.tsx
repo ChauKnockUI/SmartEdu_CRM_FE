@@ -6,6 +6,7 @@ import { LeadDetailPage } from '../features/crm/LeadDetailPage';
 import { StudentsPage } from '../features/lms/StudentsPage';
 import { StudentDetailPage } from '../features/lms/StudentDetailPage';
 import { TeachersPage } from '../features/lms/TeachersPage';
+import { CoursesPage } from '../features/lms/CoursesPage';
 import { ClassesPage } from '../features/lms/ClassesPage';
 import { ClassDetailPage } from '../features/lms/ClassDetailPage';
 import { SessionDetailPage } from '../features/lms/SessionDetailPage';
@@ -20,6 +21,7 @@ import { UsersPage } from '../features/settings/UsersPage';
 import { LoginPage } from '../features/auth/loginPage';
 import { ProtectedRoute } from '../shared/components/ProtectedRoute';
 import { RegisterPage } from '@/features/auth/registerPage';
+import { CourseDetailPage } from '@/features/lms/CourseDetail';
 
 export const router = createBrowserRouter([
   // ✅ PUBLIC ROUTE
@@ -82,6 +84,8 @@ export const router = createBrowserRouter([
               { path: 'students', element: <StudentsPage /> },
               { path: 'students/:id', element: <StudentDetailPage /> },
               { path: 'teachers', element: <TeachersPage /> },
+              { path: 'courses', element: <CoursesPage /> },
+              { path: 'courses/:id', element: <CourseDetailPage /> },
               { path: 'classes', element: <ClassesPage /> },
               { path: 'classes/:id', element: <ClassDetailPage /> },
               { path: 'sessions/:id', element: <SessionDetailPage /> },

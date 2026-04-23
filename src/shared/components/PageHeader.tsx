@@ -6,6 +6,7 @@ import type { BreadcrumbProps } from 'antd';
 interface PageHeaderProps {
   title: string;
   breadcrumbs?: BreadcrumbProps['items'];
+  description?: string;
   actions?: React.ReactNode;
 }
 
