@@ -5,6 +5,7 @@ type Resource =
   | 'students'
   | 'teachers'
   | 'classes'
+  | 'rooms'
   | 'courses'
   | 'sessions'
   | 'payments'
@@ -41,6 +42,11 @@ const permissions: Record<Resource, Record<Action, UserRole[]>> = {
     write: ['admin', 'teacher'],
     delete: ['admin'],
   },
+  rooms: {
+    read: ['admin', 'teacher'],
+    write: ['admin'],
+    delete: ['admin'],
+},
   sessions: {
     read: ['admin', 'sale', 'teacher', 'student'],
     write: ['admin', 'teacher'],
