@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
     Card, Table, Button, Tag, Space,
-    Input, Select, Modal, Form, InputNumber, message
+    Input, Select, Modal, Form, InputNumber, message, Popconfirm
 } from 'antd';
 import { EditOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router';
@@ -100,6 +100,19 @@ export function CoursesPage() {
         }
     };
 
+    const handleDelete = async (id: number) => {
+        try {
+            await courseService.remove(id);
+
+            message.success('Xóa khóa học thành công');
+
+            fetchCourses(); // reload list
+        } catch (err: any) {
+            console.error(err);
+            message.error(err.message || 'Xóa thất bại');
+        }
+    };
+
     const handleModalCancel = () => {
         setIsModalOpen(false);
         form.resetFields();
@@ -154,6 +167,20 @@ export function CoursesPage() {
                         <Button onClick={() => handleEdit(record)}>
                             <EditOutlined />
                         </Button>
+                    )}
+
+                    {canEdit && (
+                        <Popconfirm
+                            title="Xóa khóa học?"
+                            description="Hành động này sẽ ẩn khóa học khỏi hệ thống"
+                            onConfirm={() => handleDelete(record.id)}
+                            okText="Xóa"
+                            cancelText="Hủy"
+                        >
+                            <Button danger>
+                                Xóa
+                            </Button>
+                        </Popconfirm>
                     )}
                 </Space>
             ),

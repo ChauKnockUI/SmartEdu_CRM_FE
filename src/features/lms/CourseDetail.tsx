@@ -1,18 +1,34 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, Descriptions, Tag, Button, Table, Space, Statistic, Row, Col } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, TeamOutlined, BookOutlined, DollarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { usePermissions } from '../../shared/hooks/usePermissions';
+import { courseService } from '@/services/api/course.service';
 
 export function CourseDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams();
   const navigate = useNavigate();
   const { can } = usePermissions();
+  const [course, setCourse] = useState<any>(null);
 
-  const course = db.courses.findById(id || '');
-  const classes = mockClasses.filter(c => c.course_id === id);
+  const fetchCourse = async () => {
+    try {
+      const courseId = Number(id);
+      const res = await courseService.getById(courseId);
+      setCourse(res.data);
+
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const classes: any[] = [];
+
+  useEffect(() => {
+    if (id) fetchCourse();
+  }, [id]);
 
   if (!course) {
     return (
@@ -28,15 +44,11 @@ export function CourseDetailPage() {
   const handleViewClass = (classId: string) => {
     navigate(`/lms/classes/${classId}`);
   };
-
-  const totalStudents = classes.reduce((sum, cls) => {
-    const enrollments = db.enrollments.findByClass(cls.id);
-    return sum + enrollments.length;
-  }, 0);
+  const totalStudents = 0;
 
   const activeClasses = classes.filter(c => c.status === 'ongoing' || c.status === 'upcoming').length;
 
-  const classColumns: ColumnsType<Class> = [
+  const classColumns: ColumnsType<any> = [
     {
       title: 'Mã lớp',
       dataIndex: 'code',
@@ -54,10 +66,12 @@ export function CourseDetailPage() {
       dataIndex: 'teacher_id',
       key: 'teacher',
       width: 180,
-      render: (teacherId: string) => {
-        const teacher = db.teachers.getWithUser(teacherId);
-        return teacher?.user?.name || 'N/A';
+      render: () => {
+        return 'N/A';
       },
+      // render: (teacherId: string) => {
+      //   return teacher?.user?.name || 'N/A';
+      // },
     },
     {
       title: 'Thời gian',
@@ -66,7 +80,9 @@ export function CourseDetailPage() {
       render: (_, record) => (
         <div className="text-sm">
           <div>{new Date(record.start_date).toLocaleDateString('vi-VN')}</div>
-          <div className="text-gray-500">đến {new Date(record.end_date).toLocaleDateString('vi-VN')}</div>
+          <div className="text-gray-500">đến record.end_date
+            ? new Date(record.end_date).toLocaleDateString('vi-VN')
+            : '—'</div>
         </div>
       ),
     },
@@ -75,9 +91,11 @@ export function CourseDetailPage() {
       key: 'students',
       width: 100,
       render: (_, record) => {
-        const enrollments = db.enrollments.findByClass(record.id);
-        return `${enrollments.length}/${record.max_students}`;
+        return `0/${record.max_students || 0}`;
       },
+      // render: (_, record) => {
+      //   return `${enrollments.length}/${record.max_students}`;
+      // },
     },
     {
       title: 'Trạng thái',
@@ -117,11 +135,21 @@ export function CourseDetailPage() {
     <div>
       <PageHeader
         title={course.name}
-        onBack={() => navigate('/lms/courses')}
-        extra={
-          can('update', 'course') ? (
-            <Button icon={<EditOutlined />}>Chỉnh sửa</Button>
-          ) : undefined
+        actions={
+          <>
+            <Button
+              icon={<ArrowLeftOutlined />}
+              onClick={() => navigate('/lms/courses')}
+            >
+              Quay lại
+            </Button>
+
+            {can('courses', 'write') && (
+              <Button icon={<EditOutlined />}>
+                Chỉnh sửa
+              </Button>
+            )}
+          </>
         }
       />
 
@@ -155,7 +183,7 @@ export function CourseDetailPage() {
             <Col span={6}>
               <Statistic
                 title="Học phí"
-                value={course.price}
+                value={Number(course.fee || 0)}
                 prefix={<DollarOutlined />}
                 suffix="đ"
                 valueStyle={{ color: '#cf1322' }}
@@ -168,11 +196,11 @@ export function CourseDetailPage() {
         <Card title="Thông tin khóa học">
           <Descriptions column={2} bordered>
             <Descriptions.Item label="Mã khóa học">
-              <span className="font-semibold">{course.code}</span>
+              <span className="font-semibold">{course.id}</span>
             </Descriptions.Item>
             <Descriptions.Item label="Trạng thái">
-              <Tag color={course.status === 'active' ? 'green' : 'default'}>
-                {course.status === 'active' ? 'Đang mở' : 'Tạm dừng'}
+              <Tag color={course.is_active ? 'green' : 'default'}>
+                {course.is_active ? 'Đang mở' : 'Tạm dừng'}
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="Thời lượng">
@@ -180,14 +208,14 @@ export function CourseDetailPage() {
             </Descriptions.Item>
             <Descriptions.Item label="Học phí">
               <span className="font-semibold text-green-600">
-                {course.price.toLocaleString('vi-VN')} đ
+                {Number(course.fee || 0).toLocaleString('vi-VN')}
               </span>
             </Descriptions.Item>
             <Descriptions.Item label="Ngày tạo">
-              {new Date(course.created_at).toLocaleDateString('vi-VN')}
+              {course.createdAt && new Date(course.createdAt).toLocaleDateString('vi-VN')}
             </Descriptions.Item>
             <Descriptions.Item label="Cập nhật lần cuối">
-              {new Date(course.updated_at).toLocaleDateString('vi-VN')}
+              {course.updatedAt && new Date(course.updatedAt).toLocaleDateString('vi-VN')}
             </Descriptions.Item>
             {course.description && (
               <Descriptions.Item label="Mô tả" span={2}>
@@ -201,7 +229,7 @@ export function CourseDetailPage() {
         <Card
           title={`Danh sách lớp học (${classes.length})`}
           extra={
-            can('create', 'class') ? (
+            can('courses', 'write') ? (
               <Button type="primary">Tạo lớp mới</Button>
             ) : undefined
           }

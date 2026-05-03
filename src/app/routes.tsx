@@ -7,6 +7,7 @@ import { StudentsPage } from '../features/lms/StudentsPage';
 import { StudentDetailPage } from '../features/lms/StudentDetailPage';
 import { TeachersPage } from '../features/lms/TeachersPage';
 import { CoursesPage } from '../features/lms/CoursesPage';
+import { CourseDetailPage } from '@/features/lms/CourseDetail';
 import { ClassesPage } from '../features/lms/ClassesPage';
 import { ClassDetailPage } from '../features/lms/ClassDetailPage';
 import { SessionDetailPage } from '../features/lms/SessionDetailPage';
@@ -21,7 +22,6 @@ import { UsersPage } from '../features/settings/UsersPage';
 import { LoginPage } from '../features/auth/loginPage';
 import { ProtectedRoute } from '../shared/components/ProtectedRoute';
 import { RegisterPage } from '@/features/auth/registerPage';
-import { CourseDetailPage } from '@/features/lms/CourseDetail';
 
 export const router = createBrowserRouter([
   // ✅ PUBLIC ROUTE
