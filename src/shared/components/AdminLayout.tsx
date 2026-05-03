@@ -5,6 +5,7 @@ import {
   UserOutlined,
   TeamOutlined,
   BookOutlined,
+  HomeOutlined,
   RobotOutlined,
   SettingOutlined,
   BellOutlined,
@@ -54,6 +55,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('Học viên', '/lms/students', <TeamOutlined />),
       getItem('Giảng viên', '/lms/teachers', <ReadOutlined />),
       getItem('Khóa học', '/lms/courses', <ReadOutlined />),
+      getItem('Phòng học', '/lms/rooms', <HomeOutlined />),
       getItem('Lớp học', '/lms/classes', <BookOutlined />),
       getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
     ]),
@@ -82,6 +84,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
           getItem('Học viên', '/lms/students', <TeamOutlined />),
           getItem('Giảng viên', '/lms/teachers', <ReadOutlined />),
           getItem('Khóa học', '/lms/courses', <ReadOutlined />),
+          getItem('Phòng học', '/lms/rooms', <HomeOutlined />), 
           getItem('Lớp học', '/lms/classes', <BookOutlined />),
           getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
           getItem('Xếp lớp', '/lms/scheduling', <SwapOutlined />),
@@ -147,7 +150,7 @@ export function AdminLayout() {
   const [guideVisible, setGuideVisible] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, switchRole, logout} = useAuth();
+  const { user, logout} = useAuth();
 
   const unreadCount = mockNotifications.filter(n => !n.is_read).length;
 
@@ -198,9 +201,6 @@ export function AdminLayout() {
     navigate(key);
   };
 
-  const handleRoleChange = (role: UserRole) => {
-    switchRole(role);
-  };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -263,21 +263,6 @@ export function AdminLayout() {
             />
           </div>
           <div className="flex items-center gap-4">
-            {/* Role Switcher for Demo */}
-            <Space>
-              <SwapOutlined />
-              <Select
-                value={user?.role}
-                onChange={handleRoleChange}
-                style={{ width: 120 }}
-                options={[
-                  { label: 'Admin', value: 'admin' },
-                  { label: 'Sale', value: 'sale' },
-                  { label: 'Teacher', value: 'teacher' },
-                  { label: 'Student', value: 'student' },
-                ]}
-              />
-            </Space>
 
             {/* Help Button */}
             <Button

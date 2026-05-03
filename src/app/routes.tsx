@@ -22,6 +22,8 @@ import { UsersPage } from '../features/settings/UsersPage';
 import { LoginPage } from '../features/auth/loginPage';
 import { ProtectedRoute } from '../shared/components/ProtectedRoute';
 import { RegisterPage } from '@/features/auth/registerPage';
+import { RoomsPage } from '@/features/lms/RoomPage';
+import { RoomDetailPage } from '@/features/lms/RoomDetailPage';
 
 export const router = createBrowserRouter([
   // ✅ PUBLIC ROUTE
@@ -86,6 +88,8 @@ export const router = createBrowserRouter([
               { path: 'teachers', element: <TeachersPage /> },
               { path: 'courses', element: <CoursesPage /> },
               { path: 'courses/:id', element: <CourseDetailPage /> },
+              { path: 'rooms',element: <RoomsPage /> },
+              { path: 'rooms/:id',element: <RoomDetailPage /> },
               { path: 'classes', element: <ClassesPage /> },
               { path: 'classes/:id', element: <ClassDetailPage /> },
               { path: 'sessions/:id', element: <SessionDetailPage /> },
