@@ -61,11 +61,13 @@ export interface Student {
 export interface Class {
   id: string;
   name: string;
+  course_id: string;
   teacher_id: string;
   status: 'active' | 'completed' | 'upcoming';
   start_date: Date;
   end_date?: Date;
   teacher?: Teacher;
+  course?: Course;
   sessions?: Session[];
   enrollments?: Enrollment[];
   createdAt: Date;
@@ -220,4 +222,23 @@ export interface ApiError {
   code: string;
   message: string;
   details?: Record<string, any>;
+}
+
+export interface Course {
+  id: string;
+  name: string;
+  description?: string;
+  total_sessions: number;
+  duration_weeks: number;
+  fee: number;
+  is_active: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+
+  // relation
+  classes?: Class[];
+}
+
+export interface CourseDTO extends Course {
+  classCount?: number;
 }

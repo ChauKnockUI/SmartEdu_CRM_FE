@@ -1,12 +1,13 @@
 import { useAuth, UserRole } from '../contexts/AuthContext';
 
-type Resource = 
-  | 'leads' 
-  | 'students' 
+type Resource =
+  | 'leads'
+  | 'students'
   | 'teachers'
-  | 'classes' 
+  | 'classes'
+  | 'courses'
   | 'sessions'
-  | 'payments' 
+  | 'payments'
   | 'ai_models'
   | 'notifications'
   | 'settings';
@@ -26,6 +27,11 @@ const permissions: Record<Resource, Record<Action, UserRole[]>> = {
     delete: ['admin'],
   },
   teachers: {
+    read: ['admin', 'sale', 'teacher'],
+    write: ['admin'],
+    delete: ['admin'],
+  },
+  courses: {
     read: ['admin', 'sale', 'teacher'],
     write: ['admin'],
     delete: ['admin'],
@@ -70,7 +76,8 @@ export interface FeaturePermissions {
   canViewLeadTimeline: boolean;
   canAddLeadInteraction: boolean;
   canViewTrialSession: boolean;
-  
+  canViewCourseDetails: boolean;
+  canEditCourseDetails: boolean;
   canViewStudentProfile: boolean;
   canEditStudentProfile: boolean;
   canViewStudentPayments: boolean;
@@ -79,22 +86,18 @@ export interface FeaturePermissions {
   canEditAttendance: boolean;
   canViewStudentRisk: boolean;
   canChangeStudentClass: boolean;
-  
   canViewClassDetails: boolean;
   canEditClassDetails: boolean;
   canManageEnrollments: boolean;
   canCreateSessions: boolean;
   canViewClassDashboard: boolean;
-  
   canTakeAttendance: boolean;
   canEditSessionContent: boolean;
   canViewSessionNotes: boolean;
-  
   canViewPaymentDetails: boolean;
   canEditPaymentDetails: boolean;
   canCreatePayment: boolean;
   canExportReceipt: boolean;
-  
   canManageNotifications: boolean;
   canBroadcastNotifications: boolean;
 }
@@ -116,7 +119,6 @@ export function usePermissions() {
       canViewLeadTimeline: ['admin', 'sale', 'teacher'].includes(role),
       canAddLeadInteraction: ['admin', 'sale'].includes(role),
       canViewTrialSession: ['admin', 'sale', 'teacher'].includes(role),
-      
       // Student permissions
       canViewStudentProfile: true, // All roles can view based on context
       canEditStudentProfile: ['admin', 'sale'].includes(role),
@@ -126,28 +128,29 @@ export function usePermissions() {
       canEditAttendance: ['admin', 'teacher'].includes(role),
       canViewStudentRisk: ['admin', 'sale', 'teacher'].includes(role),
       canChangeStudentClass: ['admin'].includes(role),
-      
       // Class permissions
       canViewClassDetails: true,
       canEditClassDetails: ['admin', 'teacher'].includes(role),
       canManageEnrollments: ['admin'].includes(role),
       canCreateSessions: ['admin'].includes(role),
       canViewClassDashboard: ['admin'].includes(role),
-      
       // Session permissions
       canTakeAttendance: ['admin', 'teacher'].includes(role),
       canEditSessionContent: ['admin', 'teacher'].includes(role),
       canViewSessionNotes: true,
-      
       // Payment permissions
       canViewPaymentDetails: ['admin', 'sale', 'student'].includes(role),
       canEditPaymentDetails: ['admin', 'sale'].includes(role),
       canCreatePayment: ['admin', 'sale'].includes(role),
       canExportReceipt: ['admin', 'sale'].includes(role),
-      
+
       // Notification permissions
       canManageNotifications: ['admin'].includes(role),
       canBroadcastNotifications: ['admin'].includes(role),
+
+      // Course permissions
+      canViewCourseDetails: ['admin', 'sale', 'teacher'].includes(role),
+      canEditCourseDetails: ['admin'].includes(role),
     };
   };
 

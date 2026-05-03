@@ -6,6 +6,8 @@ import { LeadDetailPage } from '../features/crm/LeadDetailPage';
 import { StudentsPage } from '../features/lms/StudentsPage';
 import { StudentDetailPage } from '../features/lms/StudentDetailPage';
 import { TeachersPage } from '../features/lms/TeachersPage';
+import { CoursesPage } from '../features/lms/CoursesPage';
+import { CourseDetailPage } from '@/features/lms/CourseDetail';
 import { ClassesPage } from '../features/lms/ClassesPage';
 import { ClassDetailPage } from '../features/lms/ClassDetailPage';
 import { SessionDetailPage } from '../features/lms/SessionDetailPage';
@@ -82,6 +84,8 @@ export const router = createBrowserRouter([
               { path: 'students', element: <StudentsPage /> },
               { path: 'students/:id', element: <StudentDetailPage /> },
               { path: 'teachers', element: <TeachersPage /> },
+              { path: 'courses', element: <CoursesPage /> },
+              { path: 'courses/:id', element: <CourseDetailPage /> },
               { path: 'classes', element: <ClassesPage /> },
               { path: 'classes/:id', element: <ClassDetailPage /> },
               { path: 'sessions/:id', element: <SessionDetailPage /> },
