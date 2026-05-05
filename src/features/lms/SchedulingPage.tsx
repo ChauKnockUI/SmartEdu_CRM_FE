@@ -7,6 +7,7 @@ import { PlusOutlined, CalendarOutlined } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { classService } from '@/services/api/class.service';
 import { getApiConfig } from '@/services/api/apiConfig';
+import { useNavigate } from 'react-router';
 
 const config = getApiConfig();
 
@@ -28,6 +29,7 @@ export function SchedulingPage() {
 
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
   const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
 
   // ================= FETCH CLASSES =================
   const fetchClasses = async () => {
@@ -148,7 +150,13 @@ export function SchedulingPage() {
 
         {/* ================= FORM ================= */}
         <Card title="Xếp lớp">
-
+          <Button
+            icon={<CalendarOutlined />}
+            onClick={() => navigate('/lms/schedule')}
+          >
+            Xem lịch dạng calendar
+          </Button>
+          
           <Form form={form} layout="vertical">
 
             {/* CLASS */}
