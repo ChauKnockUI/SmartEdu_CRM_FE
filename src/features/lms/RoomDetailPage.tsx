@@ -3,7 +3,7 @@ import {
   Card, Descriptions, Tag, Button, Alert
 } from 'antd';
 import {
-  ArrowLeftOutlined, EditOutlined,
+  ArrowLeftOutlined,
   HomeOutlined, CheckCircleOutlined, CloseCircleOutlined
 } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router';
@@ -19,7 +19,6 @@ export function RoomDetailPage() {
   const [room, setRoom] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
-  // ================= FETCH =================
   const fetchRoom = async () => {
     try {
       setLoading(true);
@@ -38,7 +37,6 @@ export function RoomDetailPage() {
     if (id) fetchRoom();
   }, [id]);
 
-  // ================= EMPTY =================
   if (!room) {
     return (
       <div className="text-center p-8">
@@ -50,7 +48,6 @@ export function RoomDetailPage() {
     );
   }
 
-  // ================= PARSE EQUIPMENT =================
   const equipmentList = room.equipment
     ? room.equipment.split(',')
     : [];
@@ -71,7 +68,6 @@ export function RoomDetailPage() {
 
       <div className="space-y-4">
 
-        {/* STATUS */}
         {!room.is_active && (
           <Alert
             message="Phòng học tạm dừng hoạt động"
@@ -82,7 +78,6 @@ export function RoomDetailPage() {
           />
         )}
 
-        {/* INFO */}
         <Card title="Thông tin phòng học" loading={loading}>
           <Descriptions column={2} bordered>
 
@@ -122,7 +117,6 @@ export function RoomDetailPage() {
                 : '-'}
             </Descriptions.Item>
 
-            {/* EQUIPMENT */}
             <Descriptions.Item label="Thiết bị" span={2}>
               {equipmentList.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
