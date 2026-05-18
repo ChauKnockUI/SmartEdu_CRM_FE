@@ -13,7 +13,7 @@ const getAuthHeader = () => {
 export const leadService = {
   getAll: async (page = 1, limit = 10) => {
     const res = await fetch(`${config.baseURL}/leads?page=${page}&limit=${limit}`, {
-      headers: getAuthHeader(), 
+      headers: getAuthHeader(),
     });
     return res.json();
   },
@@ -70,6 +70,21 @@ export const leadService = {
     const json = await res.json();
 
     if (!res.ok) throw new Error(json.message);
+
+    return json;
+  },
+
+  convert: async (id: number) => {
+    const res = await fetch(`${config.baseURL}/leads/${id}/convert`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error(json.message || 'Chuyển đổi thất bại');
+    }
 
     return json;
   },

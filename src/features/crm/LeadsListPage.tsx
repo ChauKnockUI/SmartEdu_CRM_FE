@@ -6,7 +6,7 @@ import {
   Space,
   Select,
   DatePicker,
-  Input, Drawer, Form, message, Modal
+  Input, Drawer, Form, message, Modal, Tabs
 } from 'antd';
 import {
   PlusOutlined,
@@ -118,6 +118,49 @@ export function LeadsListPage() {
     });
   };
 
+  const handleConvert = (lead: any) => {
+    Modal.confirm({
+      title: 'Chuyển Lead thành học viên?',
+      content: `${lead.full_name || lead.name} sẽ trở thành học viên.`,
+      okText: 'Chuyển',
+      cancelText: 'Hủy',
+
+      onOk: async () => {
+        try {
+          const res = await leadService.convert(lead.id);
+
+          const password =
+            res.temp_password ||
+            res.data?.temp_password ||
+            res.data?.student?.temp_password;
+
+          Modal.success({
+            title: 'Chuyển đổi thành công',
+            content: (
+              <div>
+                <p>Học viên đã được tạo thành công.</p>
+
+                {password ? (
+                  <p>
+                    Mật khẩu tạm: <b>{password}</b>
+                  </p>
+                ) : (
+                  <p className="text-red-500">
+                    Không nhận được mật khẩu từ backend
+                  </p>
+                )}
+              </div>
+            ),
+          });
+
+          fetchLeads(pagination.current);
+        } catch (err: any) {
+          message.error(err.message || 'Chuyển đổi thất bại');
+        }
+      },
+    });
+  };
+
   const getScore = (lead: any) =>
     lead.aiScore?.probability_score ?? 0;
 
@@ -205,17 +248,64 @@ export function LeadsListPage() {
             disabled={record.status === 'converted'}
           />
           {user?.role === 'admin' || user?.role === 'sale' ? (
-          <Button
-            danger
-            type="text"
-            icon={<DeleteOutlined />}
-            onClick={() => handleDelete(record.id)}
-          />
+            <Button
+              danger
+              type="text"
+              icon={<DeleteOutlined />}
+              onClick={() => handleDelete(record.id)}
+            />
           ) : null}
+          {(record.status === 'enrolled') ? (
+            <Button disabled type="link">
+              Student
+            </Button>
+          ) : (
+            <Button
+              type="link"
+              onClick={() => handleConvert(record)}
+            >
+              Convert
+            </Button>
+          )}
         </Space>
       ),
     },
   ];
+
+  const convertedColumns = columns.map((col: any) => {
+    if (col.key === 'actions') {
+      return {
+        ...col,
+        render: (_: any, record: any) => (
+          <Space>
+            <Button
+              type="link"
+              onClick={() => navigate('/lms/students')}
+            >
+              Student
+            </Button>
+          </Space>
+        ),
+      };
+    }
+
+    if (col.key === 'status') {
+      return {
+        ...col,
+        render: () => <Tag color="green">Đã chuyển</Tag>,
+      };
+    }
+
+    return col;
+  });
+
+  const pendingLeads = leads.filter(
+    (lead) => lead.status !== 'enrolled'
+  );
+
+  const convertedLeads = leads.filter(
+    (lead) => lead.status === 'enrolled'
+  );
 
   return (
     <div>
@@ -249,18 +339,43 @@ export function LeadsListPage() {
           <Input.Search placeholder="Tìm kiếm..." style={{ width: 250 }} />
         </div>
 
-        <Table
-          rowKey="id"
-          columns={columns}
-          dataSource={leads}
-          loading={loading}
-          pagination={{
-            current: pagination.current,
-            pageSize: pagination.pageSize,
-            total: pagination.total,
-            onChange: (page) => fetchLeads(page),
-            showTotal: (total) => `Tổng ${total} leads`,
-          }}
+        <Tabs
+          defaultActiveKey="pending"
+          items={[
+            {
+              key: 'pending',
+              label: `Lead chưa chuyển (${pendingLeads.length})`,
+              children: (
+                <Table
+                  columns={columns}
+                  dataSource={pendingLeads}
+                  rowKey="id"
+                  loading={loading}
+                  pagination={{
+                    pageSize: 10,
+                    showSizeChanger: true,
+                    showTotal: (t) => `Tổng ${t} lead`,
+                  }}
+                />
+              ),
+            },
+            {
+              key: 'converted',
+              label: `Đã chuyển thành học viên (${convertedLeads.length})`,
+              children: (
+                <Table
+                  columns={convertedColumns}
+                  dataSource={convertedLeads}
+                  rowKey="id"
+                  loading={loading}
+                  pagination={{
+                    pageSize: 10,
+                    showSizeChanger: true,
+                  }}
+                />
+              ),
+            },
+          ]}
         />
 
         <Drawer

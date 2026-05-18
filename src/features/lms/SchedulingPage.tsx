@@ -1,357 +1,307 @@
-import React, { useState } from 'react';
-import { Card, Form, Select, Button, Space, Table, Tag, Alert, Modal, message, Divider } from 'antd';
-import { WarningOutlined, CheckCircleOutlined, PlusOutlined, CalendarOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
+import {
+  Card, Form, Select, Button, Space,
+  Table, Tag, Alert, message, Divider
+} from 'antd';
+import { PlusOutlined, CalendarOutlined } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
-import { mockClasses, mockTeachers, mockStudents } from '../../services/mock/mockData';
+import { classService } from '@/services/api/class.service';
+import { getApiConfig } from '@/services/api/apiConfig';
+import { useNavigate } from 'react-router';
 
-// Mock schedule data to check conflicts
-const mockSchedules = [
-  { id: 'sch1', personId: 't1', personName: 'Teacher A', classId: 'c1', className: 'IELTS Foundation', schedule: 'T2-4-6: 19:00-21:00' },
-  { id: 'sch2', personId: 't2', personName: 'Teacher B', classId: 'c2', className: 'TOEIC Advanced', schedule: 'T3-5-7: 18:00-20:00' },
-  { id: 'sch3', personId: 's1', personName: 'Nguyễn Văn A', classId: 'c1', className: 'IELTS Foundation', schedule: 'T2-4-6: 19:00-21:00' },
-  { id: 'sch4', personId: 's2', personName: 'Trần Thị B', classId: 'c3', className: 'IELTS Intensive', schedule: 'T2-4-6: 14:00-16:00' },
-];
+const config = getApiConfig();
 
-// Helper function to check schedule conflict
-const checkScheduleConflict = (personId: string, newSchedule: string) => {
-  const existingSchedules = mockSchedules.filter(s => s.personId === personId);
-  
-  // Simple conflict detection based on schedule string
-  // In real app, this would parse time slots and check overlaps
-  const hasConflict = existingSchedules.some(s => {
-    // Extract day patterns (T2-4-6, T3-5-7, etc.)
-    const existingDays = s.schedule.split(':')[0];
-    const newDays = newSchedule.split(':')[0];
-    
-    // Check if any days overlap
-    const existingDayList = existingDays.match(/\d/g) || [];
-    const newDayList = newDays.match(/\d/g) || [];
-    
-    return existingDayList.some(day => newDayList.includes(day));
-  });
-  
-  return {
-    hasConflict,
-    conflicts: hasConflict ? existingSchedules : [],
-  };
-};
+const getAuthHeader = () => ({
+  ...config.headers,
+  Authorization: `Bearer ${localStorage.getItem('token')}`,
+});
+
+type Class = any;
+type Room = any;
+type Teacher = any;
 
 export function SchedulingPage() {
   const [form] = Form.useForm();
-  const [assignType, setAssignType] = useState<'teacher' | 'student'>('teacher');
-  const [selectedPerson, setSelectedPerson] = useState<string | null>(null);
-  const [selectedClass, setSelectedClass] = useState<any>(null);
-  const [conflicts, setConflicts] = useState<any[]>([]);
-  const [showConflictWarning, setShowConflictWarning] = useState(false);
 
-  const handlePersonChange = (personId: string) => {
-    setSelectedPerson(personId);
-    setConflicts([]);
-    setShowConflictWarning(false);
-  };
+  const [classes, setClasses] = useState<Class[]>([]);
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
 
-  const handleClassChange = (classId: string) => {
-    const classItem = mockClasses.find(c => c.id === classId);
-    setSelectedClass(classItem);
-    
-    if (selectedPerson && classItem) {
-      // Check for conflicts
-      const result = checkScheduleConflict(selectedPerson, classItem.schedule || '');
-      if (result.hasConflict) {
-        setConflicts(result.conflicts);
-        setShowConflictWarning(true);
-      } else {
-        setConflicts([]);
-        setShowConflictWarning(false);
-      }
+  const [selectedClass, setSelectedClass] = useState<Class | null>(null);
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+
+  // ================= FETCH CLASSES =================
+  const fetchClasses = async () => {
+    try {
+      const res = await classService.getAll();
+      setClasses(res.data || []);
+    } catch {
+      message.error('Lỗi tải lớp');
     }
   };
 
-  const handleAssign = () => {
-    const values = form.getFieldsValue();
-    
-    if (showConflictWarning) {
-      Modal.confirm({
-        title: 'Xác nhận xếp lớp có xung đột lịch',
-        icon: <WarningOutlined style={{ color: '#faad14' }} />,
-        content: (
-          <div>
-            <p>Phát hiện trùng lịch học. Bạn có chắc chắn muốn tiếp tục?</p>
-            <ul className="mt-2">
-              {conflicts.map(c => (
-                <li key={c.id}>• {c.className} - {c.schedule}</li>
-              ))}
-            </ul>
-          </div>
-        ),
-        okText: 'Tiếp tục xếp lớp',
-        cancelText: 'Hủy',
-        onOk: () => {
-          confirmAssign(values);
-        },
+  useEffect(() => {
+    fetchClasses();
+  }, []);
+
+  // ================= HELPER =================
+  const dayMapReverse: any = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 0,
+  };
+
+  const convertDays = (days: string) => {
+    return days?.split(',').map((d: string) => dayMapReverse[d]).join(',');
+  };
+
+  const convertTime = (time: string) => {
+    return time?.replace(' - ', ',');
+  };
+
+  const formatSchedule = (cls: Class) => {
+    return `${cls.schedule_days} (${cls.schedule_time})`;
+  };
+
+  // ================= LOAD AVAILABLE =================
+  const loadAvailable = async (cls: Class) => {
+    try {
+      setLoading(true);
+
+      const params = new URLSearchParams({
+        start_date: cls.start_date,
+        end_date: cls.end_date,
+        schedule_days: convertDays(cls.schedule_days),
+        schedule_time: convertTime(cls.schedule_time),
       });
-    } else {
-      confirmAssign(values);
+
+      const [roomRes, teacherRes] = await Promise.all([
+        fetch(`${config.baseURL}/rooms/available?${params}`, {
+          headers: getAuthHeader(),
+        }),
+        fetch(`${config.baseURL}/teachers/available?${params}`, {
+          headers: getAuthHeader(),
+        }),
+      ]);
+
+      const roomJson = await roomRes.json();
+      const teacherJson = await teacherRes.json();
+
+      setRooms(roomJson.data || []);
+      setTeachers(teacherJson.data || []);
+
+    } catch (err) {
+      console.error(err);
+      message.error('Không thể load phòng / giáo viên');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const confirmAssign = (values: any) => {
-    const personName = assignType === 'teacher' 
-      ? mockTeachers.find(t => t.id === values.personId)?.name
-      : mockStudents.find(s => s.id === values.personId)?.name;
-    const className = mockClasses.find(c => c.id === values.classId)?.name;
-    
-    message.success(`Đã xếp ${personName} vào lớp ${className}`);
-    form.resetFields();
-    setSelectedPerson(null);
-    setSelectedClass(null);
-    setConflicts([]);
-    setShowConflictWarning(false);
+  // ================= SELECT CLASS =================
+  const handleClassChange = (classId: number) => {
+    const cls = classes.find(c => c.id === classId);
+    setSelectedClass(cls || null);
+
+    if (cls) {
+      loadAvailable(cls);
+    }
   };
 
-  const currentSchedules = mockSchedules.filter(s => 
-    assignType === 'teacher' ? s.personId.startsWith('t') : s.personId.startsWith('s')
-  );
+  // ================= ASSIGN =================
+  const handleAssign = async () => {
+    try {
+      const values = await form.validateFields();
+
+      await classService.update(values.classId, {
+        room_id: values.room_id,
+        teacher_id: values.teacher_id,
+      });
+
+      message.success('Xếp lớp thành công');
+
+      form.resetFields();
+      setSelectedClass(null);
+      setRooms([]);
+      setTeachers([]);
+
+    } catch {
+      message.error('Xếp lớp thất bại');
+    }
+  };
 
   return (
     <div>
       <PageHeader
-        title="Xếp lịch học"
+        title="Xếp lớp"
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'LMS' },
-          { title: 'Xếp lịch học' },
+          { title: 'Xếp lớp' },
         ]}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Assignment Form */}
-        <Card title="Xếp lớp mới" extra={
-          <Select
-            value={assignType}
-            onChange={setAssignType}
-            style={{ width: 150 }}
-            options={[
-              { label: 'Giảng viên', value: 'teacher' },
-              { label: 'Học viên', value: 'student' },
-            ]}
-          />
-        }>
-          <Form form={form} layout="vertical">
-            <Form.Item
-              name="personId"
-              label={assignType === 'teacher' ? 'Chọn giảng viên' : 'Chọn học viên'}
-              rules={[{ required: true, message: 'Vui lòng chọn' }]}
-            >
-              <Select
-                showSearch
-                placeholder={`Tìm ${assignType === 'teacher' ? 'giảng viên' : 'học viên'}...`}
-                onChange={handlePersonChange}
-                filterOption={(input, option) =>
-                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-                options={
-                  assignType === 'teacher'
-                    ? mockTeachers.map(t => ({ label: t.full_name, value: t.id }))
-                    : mockStudents.map(s => ({ label: s.full_name, value: s.id }))
-                }
-              />
-            </Form.Item>
 
+        {/* ================= FORM ================= */}
+        <Card title="Xếp lớp">
+          <Button
+            icon={<CalendarOutlined />}
+            onClick={() => navigate('/lms/schedule')}
+          >
+            Xem lịch dạng calendar
+          </Button>
+          
+          <Form form={form} layout="vertical">
+
+            {/* CLASS */}
             <Form.Item
               name="classId"
-              label="Chọn lớp học"
-              rules={[{ required: true, message: 'Vui lòng chọn lớp học' }]}
+              label="Chọn lớp"
+              rules={[{ required: true }]}
             >
               <Select
-                showSearch
-                placeholder="Tìm lớp học..."
+                placeholder="Chọn lớp"
                 onChange={handleClassChange}
-                filterOption={(input, option) =>
-                  (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                }
-                options={mockClasses.map(c => ({
-                  label: `${c.name} - ${c.schedule}`,
+                options={classes.map(c => ({
+                  label: c.name,
                   value: c.id,
                 }))}
               />
             </Form.Item>
 
-            {selectedClass && (
-              <Alert
-                message="Thông tin lớp học"
-                description={
-                  <div className="space-y-1">
-                    <div><strong>Lớp:</strong> {selectedClass.name}</div>
-                    <div><strong>Lịch:</strong> {selectedClass.schedule}</div>
-                    <div><strong>Phòng:</strong> {selectedClass.room || 'Online'}</div>
-                    <div><strong>Giảng viên:</strong> {selectedClass.teacherName}</div>
-                  </div>
-                }
-                type="info"
-                showIcon
-                className="mb-4"
+            {/* ROOM */}
+            <Form.Item name="room_id" label="Chọn phòng">
+              <Select
+                loading={loading}
+                placeholder="Chọn phòng"
+                options={rooms.map(r => ({
+                  label: r.is_available
+                    ? `${r.name} (${r.capacity})`
+                    : `${r.name} (Đang bận)`,
+                  value: r.id,
+                  disabled: !r.is_available,
+                }))}
               />
-            )}
+            </Form.Item>
 
-            {showConflictWarning && (
-              <Alert
-                message="⚠️ Phát hiện trùng lịch học"
-                description={
-                  <div>
-                    <p className="mb-2">Lịch học bị xung đột với:</p>
-                    <ul className="list-disc pl-5">
-                      {conflicts.map(c => (
-                        <li key={c.id}>
-                          <strong>{c.className}</strong> - {c.schedule}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                }
-                type="warning"
-                showIcon
-                className="mb-4"
+            {/* TEACHER */}
+            <Form.Item name="teacher_id" label="Chọn giảng viên">
+              <Select
+                loading={loading}
+                placeholder="Chọn giáo viên"
+                options={teachers.map(t => ({
+                  label: t.is_available
+                    ? t.full_name
+                    : `${t.full_name} (Đang bận)`,
+                  value: t.id,
+                  disabled: !t.is_available,
+                }))}
               />
-            )}
+            </Form.Item>
 
             <Form.Item>
               <Space>
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   icon={<PlusOutlined />}
                   onClick={handleAssign}
-                  danger={showConflictWarning}
                 >
-                  {showConflictWarning ? 'Xếp lớp (có xung đột)' : 'Xếp lớp'}
+                  Xếp lớp
                 </Button>
-                <Button onClick={() => {
-                  form.resetFields();
-                  setSelectedPerson(null);
-                  setSelectedClass(null);
-                  setConflicts([]);
-                  setShowConflictWarning(false);
-                }}>
+
+                <Button
+                  onClick={() => {
+                    form.resetFields();
+                    setSelectedClass(null);
+                  }}
+                >
                   Hủy
                 </Button>
               </Space>
             </Form.Item>
+
           </Form>
         </Card>
 
-        {/* Current Person Schedule */}
-        <Card 
-          title={`Lịch hiện tại - ${assignType === 'teacher' ? 'Giảng viên' : 'Học viên'}`}
-        >
-          {selectedPerson ? (
-            <div>
+        {/* ================= PREVIEW ================= */}
+        <Card title="Thông tin lớp">
+
+          {selectedClass ? (
+            <>
               <Alert
-                message={
-                  assignType === 'teacher' 
-                    ? mockTeachers.find(t => t.id === selectedPerson)?.full_name
-                    : mockStudents.find(s => s.id === selectedPerson)?.full_name
-                }
-                description={`Danh sách lớp đang ${assignType === 'teacher' ? 'dạy' : 'học'}`}
                 type="info"
                 showIcon
-                className="mb-4"
+                message="Thông tin lớp"
+                description={
+                  <div>
+                    <div><b>Lớp:</b> {selectedClass.name}</div>
+                    <div><b>Lịch:</b> {formatSchedule(selectedClass)}</div>
+                    <div><b>Thời gian:</b> {new Date(selectedClass.start_date).toLocaleDateString('vi-VN')} - {new Date(selectedClass.end_date).toLocaleDateString('vi-VN')}</div>
+                  </div>
+                }
               />
-              
+
+              <Divider />
+
+              {/* ROOM TABLE */}
+              <h4>Phòng rảnh</h4>
               <Table
-                dataSource={mockSchedules.filter(s => s.personId === selectedPerson)}
+                dataSource={rooms}
                 rowKey="id"
-                pagination={false}
                 size="small"
+                pagination={false}
                 columns={[
+                  { title: 'Tên phòng', dataIndex: 'name' },
+                  { title: 'Sức chứa', dataIndex: 'capacity' },
+                ]}
+              />
+
+              <Divider />
+
+              {/* TEACHER TABLE */}
+              <h4>Giảng viên rảnh</h4>
+              <Table
+                dataSource={teachers}
+                rowKey="id"
+                size="small"
+                pagination={false}
+                columns={[
+                  { title: 'Tên', dataIndex: 'full_name' },
                   {
-                    title: 'Lớp học',
-                    dataIndex: 'className',
-                    key: 'className',
-                  },
-                  {
-                    title: 'Lịch học',
-                    dataIndex: 'schedule',
-                    key: 'schedule',
-                  },
-                  {
-                    title: 'Thao tác',
-                    key: 'action',
-                    render: () => (
-                      <Button type="link" size="small" danger>
-                        Xóa
-                      </Button>
-                    ),
+                    title: 'Trạng thái',
+                    render: () => <Tag color="green">Rảnh</Tag>,
                   },
                 ]}
               />
-            </div>
+            </>
           ) : (
-            <div className="text-center text-gray-400 py-8">
-              Chọn {assignType === 'teacher' ? 'giảng viên' : 'học viên'} để xem lịch
+            <div className="text-gray-400 text-center py-10">
+              Chọn lớp để xem thông tin
             </div>
           )}
+
         </Card>
+
       </div>
 
       <Divider />
 
-      {/* All Schedules Table */}
-      <Card 
-        title={`Tất cả lịch ${assignType === 'teacher' ? 'giảng dạy' : 'học tập'}`}
-        extra={
-          <Space>
-            <Button icon={<CalendarOutlined />}>
-              Xem lịch dạng calendar
-            </Button>
-          </Space>
-        }
+      {/* ================= FUTURE: STUDENT ================= */}
+      <Card
+        title="(Tương lai) Xếp học viên"
+        extra={<Button icon={<CalendarOutlined />}>Sắp làm</Button>}
       >
-        <Table
-          dataSource={currentSchedules}
-          rowKey="id"
-          columns={[
-            {
-              title: assignType === 'teacher' ? 'Giảng viên' : 'Học viên',
-              dataIndex: 'personName',
-              key: 'personName',
-            },
-            {
-              title: 'Lớp học',
-              dataIndex: 'className',
-              key: 'className',
-            },
-            {
-              title: 'Lịch học',
-              dataIndex: 'schedule',
-              key: 'schedule',
-            },
-            {
-              title: 'Trạng thái',
-              key: 'status',
-              render: () => (
-                <Tag color="green" icon={<CheckCircleOutlined />}>
-                  Đang hoạt động
-                </Tag>
-              ),
-            },
-            {
-              title: 'Thao tác',
-              key: 'action',
-              render: (_, record) => (
-                <Space size="small">
-                  <Button type="link" size="small">
-                    Chi tiết
-                  </Button>
-                  <Button type="link" size="small" danger>
-                    Xóa khỏi lớp
-                  </Button>
-                </Space>
-              ),
-            },
-          ]}
-          pagination={{ pageSize: 10 }}
-        />
+        <div className="text-gray-400 text-center py-6">
+          Sau này bạn có thể add student vào đây
+        </div>
       </Card>
+
     </div>
   );
 }
