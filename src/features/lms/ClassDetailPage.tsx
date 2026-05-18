@@ -10,12 +10,13 @@ import {
   Form,
   Input,
   InputNumber,
-  Select
+  Select, Table, Space, Alert
 } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams } from 'react-router';
 import { classService } from '@/services/api/class.service';
+import { studentService } from '@/services/api/student.service';
 
 type Class = any;
 
@@ -23,6 +24,10 @@ export function ClassDetailPage() {
   const { id } = useParams();
   const [classItem, setClassItem] = useState<Class | null>(null);
   const [loading, setLoading] = useState(false);
+  const [students, setStudents] = useState<any[]>([]);
+  const [enrollModalOpen, setEnrollModalOpen] = useState(false);
+  const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
+  const [enrollLoading, setEnrollLoading] = useState(false);
 
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [form] = Form.useForm();
@@ -66,9 +71,22 @@ export function ClassDetailPage() {
       setLoading(false);
     }
   };
+  const fetchStudents = async () => {
+    try {
+      const res = await studentService.getAll({
+        page: 1,
+        limit: 100,
+      });
+
+      setStudents(res.data || []);
+    } catch {
+      message.error('Không tải được danh sách học viên');
+    }
+  };
 
   useEffect(() => {
     fetchClass();
+    fetchStudents();
   }, [id]);
 
   if (!classItem) return <div>Không tìm thấy lớp</div>;
@@ -117,6 +135,73 @@ export function ClassDetailPage() {
     const s = map[status] || map.upcoming;
 
     return <Tag color={s.color}>{s.label}</Tag>;
+  };
+
+  const handleEnroll = async () => {
+    if (!selectedStudentIds.length) {
+      message.warning('Chọn ít nhất 1 học viên');
+      return;
+    }
+
+    try {
+      setEnrollLoading(true);
+
+      const res = await classService.enrollStudents(
+        classItem.id,
+        selectedStudentIds
+      );
+
+      const failed = res.data.failed || [];
+      const successful = res.data.successful || [];
+
+      if (failed.length === 0) {
+        message.success('Ghi danh thành công tất cả học viên');
+        setEnrollModalOpen(false);
+        setSelectedStudentIds([]);
+        fetchClass();
+        return;
+      }
+
+      Modal.info({
+        title: 'Kết quả ghi danh',
+        width: 700,
+        content: (
+          <div>
+            <Alert
+              type="success"
+              message={`Thành công: ${successful.length} học viên`}
+              className="mb-4"
+            />
+
+            <Table
+              size="small"
+              pagination={false}
+              rowKey="student_id"
+              dataSource={failed}
+              columns={[
+                {
+                  title: 'Student ID',
+                  dataIndex: 'student_id',
+                },
+                {
+                  title: 'Lý do',
+                  dataIndex: 'reason',
+                },
+              ]}
+            />
+          </div>
+        ),
+      });
+
+      setEnrollModalOpen(false);
+      setSelectedStudentIds([]);
+      fetchClass();
+
+    } catch (err: any) {
+      message.error(err.message);
+    } finally {
+      setEnrollLoading(false);
+    }
   };
 
   return (
@@ -192,6 +277,29 @@ export function ClassDetailPage() {
               </Card>
             ),
           },
+          {
+            key: 'students',
+            label: 'Học viên',
+            children: (
+              <Card
+                extra={
+                  <Button
+                    type="primary"
+                    onClick={() => setEnrollModalOpen(true)}
+                  >
+                    Thêm học viên
+                  </Button>
+                }
+              >
+                <p>
+                  Sĩ số:
+                  {classItem._count?.classEnrollments || 0}
+                  /
+                  {classItem.max_students}
+                </p>
+              </Card>
+            )
+          }
         ]}
       />
 
@@ -232,6 +340,29 @@ export function ClassDetailPage() {
           </Form.Item>
 
         </Form>
+      </Modal>
+
+      <Modal
+        title="Thêm học viên vào lớp"
+        open={enrollModalOpen}
+        onCancel={() => setEnrollModalOpen(false)}
+        onOk={handleEnroll}
+        confirmLoading={enrollLoading}
+        width={700}
+      >
+        <Select
+          mode="multiple"
+          style={{ width: '100%' }}
+          placeholder="Chọn học viên"
+          value={selectedStudentIds}
+          onChange={setSelectedStudentIds}
+          optionFilterProp="label"
+          showSearch
+          options={students.map((s) => ({
+            value: s.id,
+            label: `${s.full_name} (${s.email})`,
+          }))}
+        />
       </Modal>
     </div>
   );
