@@ -56,16 +56,67 @@ export function SchedulingPage() {
     Sun: 0,
   };
 
+  const parseScheduleDays = (days: any): number[] => {
+    if (Array.isArray(days)) {
+      return days.map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+    }
+
+    if (typeof days !== 'string') return [];
+
+    const trimmed = days.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+      }
+    } catch {
+      // Fallback to comma/day-name parsing below.
+    }
+
+    return trimmed
+      .split(',')
+      .map((day: string) => day.trim())
+      .map((day: string) => dayMapReverse[day] ?? Number(day))
+      .filter(day => Number.isInteger(day) && day >= 0 && day <= 6);
+  };
+
+  const parseScheduleTime = (time: any): string[] => {
+    if (Array.isArray(time)) {
+      return time.map(String).filter(Boolean).slice(0, 2);
+    }
+
+    if (typeof time !== 'string') return [];
+
+    const trimmed = time.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map(String).filter(Boolean).slice(0, 2);
+      }
+    } catch {
+      // Fallback to regex parsing below.
+    }
+
+    const matches = trimmed.match(/\d{1,2}:\d{2}/g);
+    return matches ? matches.slice(0, 2) : [];
+  };
+
   const convertDays = (days: string) => {
-    return days?.split(',').map((d: string) => dayMapReverse[d]).join(',');
+    return parseScheduleDays(days).join(',');
   };
 
   const convertTime = (time: string) => {
-    return time?.replace(' - ', ',');
+    return parseScheduleTime(time).join(',');
   };
 
   const formatSchedule = (cls: Class) => {
-    return `${cls.schedule_days} (${cls.schedule_time})`;
+    const days = parseScheduleDays(cls.schedule_days).join(',');
+    const time = parseScheduleTime(cls.schedule_time).join(' - ');
+    return `${days || cls.schedule_days} (${time || cls.schedule_time})`;
   };
 
   // ================= LOAD AVAILABLE =================
@@ -74,6 +125,7 @@ export function SchedulingPage() {
       setLoading(true);
 
       const params = new URLSearchParams({
+        class_id: String(cls.id),
         start_date: cls.start_date,
         end_date: cls.end_date,
         schedule_days: convertDays(cls.schedule_days),
@@ -91,6 +143,9 @@ export function SchedulingPage() {
 
       const roomJson = await roomRes.json();
       const teacherJson = await teacherRes.json();
+
+      if (!roomRes.ok) throw new Error(roomJson.message || 'Không thể tải phòng rảnh');
+      if (!teacherRes.ok) throw new Error(teacherJson.message || 'Không thể tải giảng viên rảnh');
 
       setRooms(roomJson.data || []);
       setTeachers(teacherJson.data || []);
@@ -130,8 +185,8 @@ export function SchedulingPage() {
       setRooms([]);
       setTeachers([]);
 
-    } catch {
-      message.error('Xếp lớp thất bại');
+    } catch (err: any) {
+      message.error(err?.message || 'Xếp lớp thất bại');
     }
   };
 
@@ -181,11 +236,11 @@ export function SchedulingPage() {
                 loading={loading}
                 placeholder="Chọn phòng"
                 options={rooms.map(r => ({
-                  label: r.is_available
+                  label: r.is_available !== false
                     ? `${r.name} (${r.capacity})`
                     : `${r.name} (Đang bận)`,
                   value: r.id,
-                  disabled: !r.is_available,
+                  disabled: r.is_available === false,
                 }))}
               />
             </Form.Item>
@@ -196,11 +251,11 @@ export function SchedulingPage() {
                 loading={loading}
                 placeholder="Chọn giáo viên"
                 options={teachers.map(t => ({
-                  label: t.is_available
+                  label: t.is_available !== false
                     ? t.full_name
                     : `${t.full_name} (Đang bận)`,
                   value: t.id,
-                  disabled: !t.is_available,
+                  disabled: t.is_available === false,
                 }))}
               />
             </Form.Item>
