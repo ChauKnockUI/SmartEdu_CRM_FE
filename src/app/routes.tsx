@@ -15,6 +15,8 @@ import { SchedulePage } from '../features/lms/SchedulePage';
 import { SchedulingPage } from '../features/lms/SchedulingPage';
 import { MySchedulePage } from '../features/lms/MySchedulePage';
 import { PaymentsPage } from '../features/finance/PaymentsPage';
+import { InvoicesPage } from '../features/finance/InvoicesPage';
+import { DebtsPage } from '../features/finance/DebtsPage';
 import { AIModelsPage } from '../features/ai/AIModelsPage';
 import { AIPredictionsPage } from '../features/ai/AIPredictionsPage';
 import { AIInsightsPage } from '../features/ai/AIInsightsPage';
@@ -105,9 +107,11 @@ export const router = createBrowserRouter([
             children: [
               {
                 index: true,
-                element: <Navigate to="/finance/payments" replace />,
+                element: <Navigate to="/finance/invoices" replace />,
               },
+              { path: 'invoices', element: <InvoicesPage /> },
               { path: 'payments', element: <PaymentsPage /> },
+              { path: 'debts', element: <DebtsPage /> },
             ],
           },
 

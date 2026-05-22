@@ -60,7 +60,9 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
     ]),
     getItem('Tài chính', '/finance', <DollarOutlined />, [
-      getItem('Học phí', '/finance/payments', <DollarOutlined />),
+      getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
+      getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
+      getItem('Công nợ', '/finance/debts', <DollarOutlined />),
     ]),
     getItem('AI & Insights', '/ai', <RobotOutlined />, [
       getItem('Models', '/ai/models', <RobotOutlined />),
@@ -90,7 +92,9 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
           getItem('Xếp lớp', '/lms/scheduling', <SwapOutlined />),
         ]),
         getItem('Tài chính', '/finance', <DollarOutlined />, [
-          getItem('Học phí', '/finance/payments', <DollarOutlined />),
+          getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
+          getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
+          getItem('Công nợ', '/finance/debts', <DollarOutlined />),
         ]),
         getItem('AI & Insights', '/ai', <RobotOutlined />, [
           getItem('Models', '/ai/models', <RobotOutlined />),
@@ -116,7 +120,9 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
           getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
         ]),
         getItem('Tài chính', '/finance', <DollarOutlined />, [
-          getItem('Học phí', '/finance/payments', <DollarOutlined />),
+          getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
+          getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
+          getItem('Công nợ', '/finance/debts', <DollarOutlined />),
         ]),
       ];
 
