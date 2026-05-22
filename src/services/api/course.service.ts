@@ -51,4 +51,21 @@ export const courseService = {
         });
         return res.json();
     },
+
+    getClasses: async (courseId: number) => {
+        const res = await fetch(
+            `${config.baseURL}/courses/${courseId}/classes`,
+            {
+                headers: getAuthHeader(),
+            }
+        );
+
+        const json = await res.json();
+
+        if (!res.ok) {
+            throw new Error(json.message || 'Lỗi tải danh sách lớp');
+        }
+
+        return json;
+    },
 };
