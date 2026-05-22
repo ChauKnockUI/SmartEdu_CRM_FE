@@ -48,6 +48,18 @@ export const financeService = {
       body: JSON.stringify(data),
     }),
 
+  createInvoiceFromClass: (data: any) =>
+    request('/invoices/from-class', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  createInvoicesForClass: (data: any) =>
+    request('/invoices/bulk-class', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
   recordPayment: (invoiceId: number, data: any) =>
     request(`/invoices/${invoiceId}/payments`, {
       method: 'POST',
@@ -63,6 +75,8 @@ export const financeService = {
   getStudentInvoices: (studentId: number) => request(`/students/${studentId}/invoices`),
 
   getDebts: () => request('/finance/debts'),
+
+  getClassFeeTemplate: (classId: number) => request(`/finance/classes/${classId}/fee-template`),
 
   getRevenueSummary: (params?: Record<string, unknown>) => {
     const query = buildQuery(params);
