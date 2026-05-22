@@ -80,4 +80,22 @@ export const classService = {
 
     return json;
   },
+
+  enrollStudents: async (classId: number, studentIds: number[]) => {
+    const res = await fetch(`${config.baseURL}/classes/${classId}/enroll`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify({
+        student_ids: studentIds,
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error(json.message || 'Ghi danh thất bại');
+    }
+
+    return json;
+  },
 };
