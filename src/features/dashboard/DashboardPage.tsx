@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Card, Row, Col, Statistic, Table, Tag, List, Timeline, Button, Alert, Progress, Space, Badge, Calendar } from 'antd';
 import {
   UserAddOutlined,
@@ -22,20 +22,32 @@ import { PageHeader } from '../../shared/components/PageHeader';
 import { mockLeads, mockStudents, mockSessions, mockPayments } from '../../services/mock/mockData';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { useNavigate } from 'react-router';
+import { financeService } from '../../services/api/finance.service';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
 export function DashboardPage() {
   const { user, role } = useAuth();
   const navigate = useNavigate();
+  const [financeSummary, setFinanceSummary] = useState<any | null>(null);
+
+  useEffect(() => {
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const to = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString();
+    financeService.getRevenueSummary({ from_date: from, to_date: to })
+      .then((res) => setFinanceSummary(res.data))
+      .catch(() => setFinanceSummary(null));
+  }, []);
 
   // Calculate KPIs
   const newLeadsCount = mockLeads.filter(l => l.status === 'new').length;
   const conversionRate = (mockLeads.filter(l => l.status === 'converted').length / mockLeads.length * 100).toFixed(1);
   const activeStudents = mockStudents.filter(s => s.status === 'active').length;
-  const monthRevenue = mockPayments
+  const mockMonthRevenue = mockPayments
     .filter(p => p.status === 'paid')
     .reduce((sum, p) => sum + p.amount, 0);
+  const monthRevenue = financeSummary?.total_revenue ?? mockMonthRevenue;
 
   // Revenue by month data
   const revenueData = [

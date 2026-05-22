@@ -29,6 +29,7 @@ import {
 import { useParams, useNavigate } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { studentService } from '@/services/api/student.service';
+import { financeService } from '@/services/api/finance.service';
 
 type Student = any;
 
@@ -67,11 +68,14 @@ const formatSchedule = (days?: string, time?: string) => {
   return `${formattedDays} (${time || ''})`;
 };
 
+const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
+
 export function StudentDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
 
   const [student, setStudent] = useState<Student | null>(null);
+  const [invoices, setInvoices] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -85,9 +89,11 @@ export function StudentDetailPage() {
       setLoading(true);
 
       const res = await studentService.getById(Number(id));
+      const invoiceRes = await financeService.getStudentInvoices(Number(id));
       const data = res.data;
 
       setStudent(data);
+      setInvoices(invoiceRes.data || []);
 
       form.setFieldsValue({
         full_name: data.full_name,
@@ -207,6 +213,23 @@ export function StudentDetailPage() {
             : '-'}
         </>
       ),
+    },
+  ];
+
+  const invoiceColumns = [
+    { title: 'Invoice', dataIndex: 'invoice_no' },
+    { title: 'Phải thu', dataIndex: 'total_amount', render: money },
+    { title: 'Đã thu', dataIndex: 'paid_amount', render: money },
+    { title: 'Còn nợ', dataIndex: 'remaining_amount', render: money },
+    {
+      title: 'Hạn thu',
+      dataIndex: 'due_date',
+      render: (value: string) => value ? new Date(value).toLocaleDateString('vi-VN') : '-',
+    },
+    {
+      title: 'Trạng thái',
+      dataIndex: 'status',
+      render: (status: string) => <Tag color={status === 'paid' ? 'green' : status === 'partial' ? 'blue' : 'orange'}>{status}</Tag>,
     },
   ];
 
@@ -348,6 +371,20 @@ export function StudentDetailPage() {
                   rowKey="id"
                   dataSource={enrolledClasses}
                   columns={scheduleColumns}
+                  pagination={false}
+                />
+              </Card>
+            ),
+          },
+          {
+            key: 'finance',
+            label: 'Học phí',
+            children: (
+              <Card title="Khoản phải thu và công nợ">
+                <Table
+                  rowKey="id"
+                  dataSource={invoices}
+                  columns={invoiceColumns}
                   pagination={false}
                 />
               </Card>
