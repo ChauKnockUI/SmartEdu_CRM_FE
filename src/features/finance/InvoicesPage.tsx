@@ -1,12 +1,38 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, message, Alert, Typography } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Table, Tag, message, Alert, Typography } from 'antd';
+import { ClockCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { financeService } from '../../services/api/finance.service';
 import { classService } from '../../services/api/class.service';
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
+
+const daysUntil = (date?: string) => {
+  if (!date) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
+  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
+};
+
+const invoiceStatus = (invoice: any) => {
+  const remaining = Number(invoice.remaining_amount || 0);
+  const paid = Number(invoice.paid_amount || 0);
+  if (remaining <= 0 || invoice.status === 'paid') return 'paid';
+  const diff = daysUntil(invoice.due_date);
+  if (diff !== null && diff < 0) return 'overdue';
+  if (paid > 0 || invoice.status === 'partial') return 'partial';
+  return 'pending';
+};
+
+const statusMeta: Record<string, { label: string; color: string }> = {
+  pending: { label: 'Chưa thu', color: 'orange' },
+  partial: { label: 'Thu một phần', color: 'blue' },
+  paid: { label: 'Đã thu đủ', color: 'green' },
+  overdue: { label: 'Quá hạn', color: 'red' },
+};
 
 export function InvoicesPage() {
   const [loading, setLoading] = useState(false);
@@ -15,6 +41,8 @@ export function InvoicesPage() {
   const [classes, setClasses] = useState<any[]>([]);
   const [template, setTemplate] = useState<any | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('active');
   const [form] = Form.useForm();
 
   const loadInvoices = async () => {
@@ -55,6 +83,40 @@ export function InvoicesPage() {
     () => (template?.items || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0),
     [template]
   );
+
+  const rows = useMemo(() => invoices
+    .map((invoice) => ({ ...invoice, view_status: invoiceStatus(invoice) }))
+    .filter((invoice) => {
+      if (statusFilter === 'active') return invoice.view_status !== 'paid';
+      if (statusFilter === 'all') return true;
+      return invoice.view_status === statusFilter;
+    })
+    .filter((invoice) => {
+      const haystack = [
+        invoice.invoice_no,
+        invoice.student?.full_name,
+        invoice.student?.email,
+        invoice.student?.phone,
+        invoice.class?.name,
+      ].join(' ').toLowerCase();
+      return haystack.includes(query.trim().toLowerCase());
+    })
+    .sort((a, b) => {
+      const rank = { overdue: 0, partial: 1, pending: 2, paid: 3 } as Record<string, number>;
+      const priority = rank[a.view_status] - rank[b.view_status];
+      if (priority !== 0) return priority;
+      return new Date(a.due_date || '2999-01-01').getTime() - new Date(b.due_date || '2999-01-01').getTime();
+    }), [invoices, query, statusFilter]);
+
+  const summary = useMemo(() => {
+    const active = invoices.filter((item) => invoiceStatus(item) !== 'paid');
+    return {
+      activeAmount: active.reduce((sum, item) => sum + Number(item.remaining_amount || 0), 0),
+      overdueAmount: active.filter((item) => invoiceStatus(item) === 'overdue').reduce((sum, item) => sum + Number(item.remaining_amount || 0), 0),
+      partialCount: active.filter((item) => invoiceStatus(item) === 'partial').length,
+      paidCount: invoices.filter((item) => invoiceStatus(item) === 'paid').length,
+    };
+  }, [invoices]);
 
   const submitCreate = async () => {
     try {
@@ -103,15 +165,41 @@ export function InvoicesPage() {
   };
 
   const columns: ColumnsType<any> = [
-    { title: 'Mã invoice', dataIndex: 'invoice_no', width: 160 },
-    { title: 'Học viên', render: (_, record) => record.student?.full_name },
-    { title: 'Lớp', render: (_, record) => record.class?.name || '-' },
-    { title: 'Tổng phí', dataIndex: 'total_amount', align: 'right', render: money },
-    { title: 'Giảm giá', dataIndex: 'discount_amount', align: 'right', render: money },
+    {
+      title: 'Ưu tiên',
+      width: 120,
+      render: (_, record) => {
+        if (record.view_status === 'overdue') return <Tag color="red" icon={<WarningOutlined />}>Quá hạn</Tag>;
+        if (record.view_status === 'partial') return <Tag color="blue" icon={<ClockCircleOutlined />}>Còn thiếu</Tag>;
+        if (record.view_status === 'paid') return <Tag color="green">Đã thu</Tag>;
+        return <Tag color="orange">Chưa thu</Tag>;
+      },
+    },
+    {
+      title: 'Học viên',
+      width: 240,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text strong>{record.student?.full_name}</Typography.Text>
+          <Typography.Text type="secondary">{record.student?.phone || record.student?.email || '-'}</Typography.Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Lớp / Invoice',
+      width: 240,
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <Typography.Text>{record.class?.name || '-'}</Typography.Text>
+          <Typography.Text type="secondary">{record.invoice_no}</Typography.Text>
+        </Space>
+      ),
+    },
+    { title: 'Phải thu', dataIndex: 'total_amount', align: 'right', render: money },
     { title: 'Đã thu', dataIndex: 'paid_amount', align: 'right', render: money },
-    { title: 'Còn nợ', dataIndex: 'remaining_amount', align: 'right', render: money },
+    { title: 'Còn lại', dataIndex: 'remaining_amount', align: 'right', render: (value) => <Typography.Text strong>{money(value)}</Typography.Text> },
     { title: 'Hạn thu', dataIndex: 'due_date', render: (value) => value ? new Date(value).toLocaleDateString('vi-VN') : '-' },
-    { title: 'Trạng thái', dataIndex: 'status', render: (status) => <Tag color={status === 'paid' ? 'green' : status === 'partial' ? 'blue' : 'orange'}>{status}</Tag> },
+    { title: 'Trạng thái', render: (_, record) => <Tag color={statusMeta[record.view_status].color}>{statusMeta[record.view_status].label}</Tag> },
   ];
 
   return (
@@ -132,7 +220,53 @@ export function InvoicesPage() {
       />
 
       <Card>
-        <Table loading={loading} rowKey="id" columns={columns} dataSource={invoices} pagination={{ pageSize: 10 }} />
+        <Row gutter={16} className="mb-4">
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small"><Statistic title="Đang phải thu" value={summary.activeAmount} formatter={(value) => money(Number(value))} /></Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small"><Statistic title="Quá hạn" value={summary.overdueAmount} valueStyle={{ color: '#cf1322' }} formatter={(value) => money(Number(value))} /></Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small"><Statistic title="Thu một phần" value={summary.partialCount} /></Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card size="small"><Statistic title="Đã thu đủ" value={summary.paidCount} /></Card>
+          </Col>
+        </Row>
+
+        <Space className="mb-4 w-full" size={12} wrap>
+          <Input
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="Tìm học viên, SĐT, email, lớp, invoice"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            style={{ width: 360 }}
+          />
+          <Select
+            value={statusFilter}
+            onChange={setStatusFilter}
+            style={{ width: 200 }}
+            options={[
+              { label: 'Đang phải thu', value: 'active' },
+              { label: 'Quá hạn', value: 'overdue' },
+              { label: 'Thu một phần', value: 'partial' },
+              { label: 'Chưa thu', value: 'pending' },
+              { label: 'Đã thu đủ', value: 'paid' },
+              { label: 'Tất cả', value: 'all' },
+            ]}
+          />
+        </Space>
+
+        <Table
+          loading={loading}
+          rowKey="id"
+          columns={columns}
+          dataSource={rows}
+          scroll={{ x: 1120 }}
+          pagination={{ pageSize: 12, showTotal: (total) => `${total} khoản phải thu` }}
+        />
       </Card>
 
       <Modal
