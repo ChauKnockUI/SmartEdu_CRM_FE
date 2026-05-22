@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, Descriptions, Tag, Button, Table, Space, Statistic, Row, Col } from 'antd';
+import { Card, Descriptions, Tag, Button, Table, Space, Statistic, Row, Col, message } from 'antd';
 import { ArrowLeftOutlined, EditOutlined, TeamOutlined, BookOutlined, DollarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router';
 import type { ColumnsType } from 'antd/es/table';
@@ -13,6 +13,7 @@ export function CourseDetailPage() {
   const { can } = usePermissions();
   const [course, setCourse] = useState<any>(null);
 
+
   const fetchCourse = async () => {
     try {
       const courseId = Number(id);
@@ -24,10 +25,28 @@ export function CourseDetailPage() {
     }
   };
 
-  const classes: any[] = [];
+  const fetchClasses = async () => {
+    try {
+      setLoadingClasses(true);
+
+      const res = await courseService.getClasses(Number(id));
+
+      setCourseClasses(res.data || []);
+    } catch (error: any) {
+      message.error(error.message);
+    } finally {
+      setLoadingClasses(false);
+    }
+  };
+
+  const [courseClasses, setCourseClasses] = useState<any[]>([]);
+  const [loadingClasses, setLoadingClasses] = useState(false);
 
   useEffect(() => {
-    if (id) fetchCourse();
+    if (id) {
+      fetchCourse();
+      fetchClasses();
+    }
   }, [id]);
 
   if (!course) {
@@ -46,7 +65,9 @@ export function CourseDetailPage() {
   };
   const totalStudents = 0;
 
-  const activeClasses = classes.filter(c => c.status === 'ongoing' || c.status === 'upcoming').length;
+  const activeClasses = courseClasses.filter(
+    c => c.status === 'ongoing' || c.status === 'upcoming'
+  ).length;
 
   const classColumns: ColumnsType<any> = [
     {
@@ -63,15 +84,11 @@ export function CourseDetailPage() {
     },
     {
       title: 'Giảng viên',
-      dataIndex: 'teacher_id',
       key: 'teacher',
       width: 180,
-      render: () => {
-        return 'N/A';
-      },
-      // render: (teacherId: string) => {
-      //   return teacher?.user?.name || 'N/A';
-      // },
+      render: (_, record) => (
+        record.teacher?.full_name || '-'
+      ),
     },
     {
       title: 'Thời gian',
@@ -79,10 +96,17 @@ export function CourseDetailPage() {
       width: 200,
       render: (_, record) => (
         <div className="text-sm">
-          <div>{new Date(record.start_date).toLocaleDateString('vi-VN')}</div>
-          <div className="text-gray-500">đến record.end_date
-            ? new Date(record.end_date).toLocaleDateString('vi-VN')
-            : '—'</div>
+          <div>
+            {new Date(record.start_date).toLocaleDateString('vi-VN')}
+          </div>
+
+          <div className="text-gray-500">
+            đến {
+              record.end_date
+                ? new Date(record.end_date).toLocaleDateString('vi-VN')
+                : '—'
+            }
+          </div>
         </div>
       ),
     },
@@ -91,11 +115,8 @@ export function CourseDetailPage() {
       key: 'students',
       width: 100,
       render: (_, record) => {
-        return `0/${record.max_students || 0}`;
+        return `${record._count?.classEnrollments || 0}/${record.max_students || 0}`;
       },
-      // render: (_, record) => {
-      //   return `${enrollments.length}/${record.max_students}`;
-      // },
     },
     {
       title: 'Trạng thái',
@@ -160,7 +181,7 @@ export function CourseDetailPage() {
             <Col span={6}>
               <Statistic
                 title="Tổng số lớp"
-                value={classes.length}
+                value={courseClasses.length}
                 prefix={<BookOutlined />}
                 valueStyle={{ color: '#1890ff' }}
               />
@@ -227,7 +248,7 @@ export function CourseDetailPage() {
 
         {/* Classes List */}
         <Card
-          title={`Danh sách lớp học (${classes.length})`}
+          title={`Danh sách lớp học (${courseClasses.length})`}
           extra={
             can('courses', 'write') ? (
               <Button type="primary">Tạo lớp mới</Button>
@@ -236,7 +257,8 @@ export function CourseDetailPage() {
         >
           <Table
             columns={classColumns}
-            dataSource={classes}
+            dataSource={courseClasses}
+            loading={loadingClasses}
             rowKey="id"
             pagination={false}
           />
