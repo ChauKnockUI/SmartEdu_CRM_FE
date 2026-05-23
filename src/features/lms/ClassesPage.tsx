@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import {
   Card, Row, Col, Tag, Button, Space,
-  message, Modal, Form, Input, DatePicker, Select, InputNumber
+  message, Modal, Form, Input, DatePicker, TimePicker, Select, InputNumber
 } from 'antd';
 import {
   PlusOutlined, TeamOutlined,
   CalendarOutlined, UserOutlined
 } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useNavigate } from 'react-router';
 import { classService } from '@/services/api/class.service';
@@ -28,14 +29,15 @@ const statusLabels: any = {
   cancelled: 'Đã hủy',
 };
 
-const dayMap: any = {
-  Mon: 'Thứ 2',
-  Tue: 'Thứ 3',
-  Wed: 'Thứ 4',
-  Thu: 'Thứ 5',
-  Fri: 'Thứ 6',
-  Sat: 'Thứ 7',
-  Sun: 'CN',
+// Backend dùng JS Date.getDay(): 0=CN, 1=T2, 2=T3, 3=T4, 4=T5, 5=T6, 6=T7
+const dayMap: Record<string, string> = {
+  '0': 'CN',
+  '1': 'Thứ 2',
+  '2': 'Thứ 3',
+  '3': 'Thứ 4',
+  '4': 'Thứ 5',
+  '5': 'Thứ 6',
+  '6': 'Thứ 7',
 };
 
 export function ClassesPage() {
@@ -72,16 +74,31 @@ export function ClassesPage() {
   }, []);
 
   // ================= FORMAT =================
-  const renderSchedule = (cls: Class) => {
-    if (!cls.schedule_days) return 'Chưa có lịch';
-
-    const days = cls.schedule_days
-      .split(',')
-      .map((d: string) => dayMap[d] || d)
-      .join(', ');
-
-    return `${days} (${cls.schedule_time})`;
+  const parseDbField = <T,>(val: any): T[] => {
+    if (Array.isArray(val)) return val;
+    if (typeof val === 'string') {
+      try { return JSON.parse(val); } catch {}
+    }
+    return [];
   };
+
+  const renderDays = (cls: Class) => {
+    if (!cls.schedule_days) return 'Chưa có lịch';
+    const daysArr = parseDbField<number>(cls.schedule_days);
+    return daysArr
+      .sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b)) // sắp xếp T2→CN
+      .map((d) => dayMap[String(d)] ?? '?')
+      .join(' • ');
+  };
+
+  const renderTime = (cls: Class) => {
+    if (!cls.schedule_time) return '';
+    const timeArr = parseDbField<string>(cls.schedule_time);
+    return timeArr.length === 2 ? `${timeArr[0]} – ${timeArr[1]}` : String(cls.schedule_time);
+  };
+
+  const formatDate = (dateStr?: string) =>
+    dateStr ? dayjs(dateStr).format('DD/MM/YYYY') : '–';
 
   // ================= CREATE =================
   const handleCreate = async () => {
@@ -91,15 +108,20 @@ export function ClassesPage() {
       await classService.create({
         name: v.name,
         course_id: v.course_id,
-        start_date: v.start_date.format('YYYY-MM-DD'),
-        end_date: v.end_date.format('YYYY-MM-DD'),
-        schedule_days: v.schedule_days.join(','), // 🔥
-        schedule_time: v.schedule_time,
+        // Gửi UTC midnight đúng ngày — tránh lệch timezone UTC+7
+        start_date: v.start_date.format('YYYY-MM-DD') + 'T00:00:00.000Z',
+        end_date: v.end_date.format('YYYY-MM-DD') + 'T00:00:00.000Z',
+        // BE nhận number[] → generateScheduleDates dùng Date.getDay() (0=CN,1=T2...)
+        schedule_days: v.schedule_days as number[],
+        // BE nhận string[] rồi tự JSON.stringify khi lưu
+        schedule_time: [
+          v.schedule_time[0].format('HH:mm'),
+          v.schedule_time[1].format('HH:mm'),
+        ],
         max_students: v.max_students,
       });
 
       message.success('Tạo lớp thành công');
-
       setOpen(false);
       form.resetFields();
       fetchClasses();
@@ -154,18 +176,24 @@ export function ClassesPage() {
                   {cls._count?.classEnrollments || 0} học viên
                 </div>
 
-                {/* Schedule */}
+                {/* Schedule days */}
                 <div className="flex items-center text-gray-600">
                   <CalendarOutlined className="mr-2" />
-                  {renderSchedule(cls)}
+                  <span>{renderDays(cls)}</span>
                 </div>
 
-                {/* Start date */}
-                <div className="text-sm text-gray-500">
-                  Khai giảng:{' '}
-                  {cls.start_date
-                    ? new Date(cls.start_date).toLocaleDateString('vi-VN')
-                    : '-'}
+                {/* Schedule time */}
+                <div className="flex items-center text-gray-600">
+                  <span className="mr-2">🕐</span>
+                  <span>{renderTime(cls) || 'Chưa có giờ'}</span>
+                </div>
+
+                {/* Date range */}
+                <div className="text-sm text-gray-500 flex items-center gap-1">
+                  <CalendarOutlined className="mr-1" />
+                  {formatDate(cls.start_date)}
+                  <span className="mx-1">→</span>
+                  {formatDate(cls.end_date)}
                 </div>
 
               </div>
@@ -205,20 +233,28 @@ export function ClassesPage() {
           <Form.Item name="schedule_days" label="Thứ học" rules={[{ required: true }]}>
             <Select
               mode="multiple"
+              placeholder="Chọn các ngày học"
               options={[
-                { label: 'T2', value: 'Mon' },
-                { label: 'T3', value: 'Tue' },
-                { label: 'T4', value: 'Wed' },
-                { label: 'T5', value: 'Thu' },
-                { label: 'T6', value: 'Fri' },
-                { label: 'T7', value: 'Sat' },
-                { label: 'CN', value: 'Sun' },
+                { label: 'Thứ 2', value: 1 },
+                { label: 'Thứ 3', value: 2 },
+                { label: 'Thứ 4', value: 3 },
+                { label: 'Thứ 5', value: 4 },
+                { label: 'Thứ 6', value: 5 },
+                { label: 'Thứ 7', value: 6 },
+                { label: 'Chủ nhật', value: 0 },
               ]}
             />
           </Form.Item>
 
-          <Form.Item name="schedule_time" label="Giờ học" rules={[{ required: true }]}>
-            <Input placeholder="VD: 18:00 - 20:00" />
+          <Form.Item
+            name="schedule_time"
+            label="Giờ học"
+            rules={[{ required: true }]}
+          >
+            <TimePicker.RangePicker
+              className="w-full"
+              format="HH:mm"
+            />
           </Form.Item>
 
           <Form.Item name="max_students" label="Sĩ số">
