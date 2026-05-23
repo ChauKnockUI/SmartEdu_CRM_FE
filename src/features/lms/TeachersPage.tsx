@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Table, Tag, Button, Space, Modal, Calendar, Badge, Card,
+  Table, Tag, Button, Space, Modal, Badge, Card,
   Form, Input, Select, message, Popconfirm
 } from 'antd';
 import {
@@ -13,6 +13,10 @@ import { teacherService } from '@/services/api/teacher.service';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
+// ✅ Dùng UTC để tránh lệch ngày do timezone
+dayjs.extend(utc);
 
 type Teacher = any;
 type TeacherSchedule = any;
@@ -73,10 +77,7 @@ export function TeachersPage() {
   const openCreateModal = () => {
     setEditingTeacher(null);
     form.resetFields();
-    form.setFieldsValue({
-      type: 'full_time',
-      is_active: true,
-    });
+    form.setFieldsValue({ type: 'full_time', is_active: true });
     setModalOpen(true);
   };
 
@@ -135,7 +136,6 @@ export function TeachersPage() {
         await teacherService.update(teacher.id, { is_active: true });
         message.success('Đã mở hoạt động giảng viên');
       }
-
       fetchTeachers();
     } catch (err: any) {
       console.error(err);
@@ -146,7 +146,6 @@ export function TeachersPage() {
   const handleResetPassword = async (teacher: Teacher) => {
     try {
       const res = await teacherService.resetPassword(teacher.id);
-
       Modal.info({
         title: 'Mật khẩu mới',
         content: (
@@ -184,26 +183,88 @@ export function TeachersPage() {
     }
   };
 
-  const getListData = (value: Dayjs) => {
-    return teacherSchedules
-      .filter(schedule => dayjs(schedule.date).isSame(value, 'day'))
-      .map(schedule => ({
-        type: schedule.status === 'cancelled' ? 'error' : 'processing',
-        content: `${formatTime(schedule.start_time)} - ${schedule.class?.name || 'Lớp học'}${schedule.room?.name ? ` (${schedule.room.name})` : ''}`,
-      }));
+  const [calendarCurrentMonth, setCalendarCurrentMonth] = useState(dayjs());
+
+  const getScheduleDate = (schedule: TeacherSchedule) =>
+    dayjs.utc(schedule.date).format('YYYY-MM-DD');
+
+  const getSchedulesForDate = (dateStr: string) =>
+    teacherSchedules.filter(s => getScheduleDate(s) === dateStr);
+
+  const buildCalendarDays = (month: Dayjs) => {
+    const startOfMonth = month.startOf('month');
+    const startDow = startOfMonth.day();
+    const offset = startDow === 0 ? 6 : startDow - 1;
+    const start = startOfMonth.subtract(offset, 'day');
+    return Array.from({ length: 42 }, (_, i) => start.add(i, 'day'));
   };
 
-  const dateCellRender = (value: Dayjs) => {
-    const listData = getListData(value);
+  const DOW_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+
+  const GCalendar = () => {
+    const days = buildCalendarDays(calendarCurrentMonth);
+    const today = dayjs().format('YYYY-MM-DD');
 
     return (
-      <ul className="events">
-        {listData.map((item, index) => (
-          <li key={index}>
-            <Badge status={item.type as any} text={item.content} />
-          </li>
-        ))}
-      </ul>
+      <div className="select-none">
+        <div className="flex items-center gap-3 mb-4">
+          <button
+            onClick={() => setCalendarCurrentMonth(m => m.subtract(1, 'month'))}
+            className="px-3 py-1 rounded border hover:bg-gray-100 text-sm"
+          >&#8249;</button>
+          <span className="text-base font-semibold w-40 text-center">
+            {calendarCurrentMonth.format('MMMM YYYY')}
+          </span>
+          <button
+            onClick={() => setCalendarCurrentMonth(m => m.add(1, 'month'))}
+            className="px-3 py-1 rounded border hover:bg-gray-100 text-sm"
+          >&#8250;</button>
+          <button
+            onClick={() => setCalendarCurrentMonth(dayjs())}
+            className="ml-2 px-3 py-1 rounded border hover:bg-gray-100 text-sm text-blue-600"
+          >Hôm nay</button>
+        </div>
+
+        <div className="grid grid-cols-7 mb-1">
+          {DOW_LABELS.map(d => (
+            <div key={d} className="text-center text-xs font-medium text-gray-500 py-1 uppercase tracking-wide">
+              {d}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-7 border-t border-l rounded-lg overflow-hidden">
+          {days.map((day, i) => {
+            const dateStr = day.format('YYYY-MM-DD');
+            const isToday = dateStr === today;
+            const isCurrentMonth = day.month() === calendarCurrentMonth.month();
+            const schedules = getSchedulesForDate(dateStr);
+            const cellCls = ['border-b border-r min-h-[100px] p-1.5', !isCurrentMonth ? 'bg-gray-50/60' : 'bg-white'].join(' ');
+            const dayCls = ['text-xs w-7 h-7 flex items-center justify-center rounded-full font-medium transition-colors', isToday ? 'bg-blue-600 text-white font-bold' : isCurrentMonth ? 'text-gray-800' : 'text-gray-400'].join(' ');
+
+            return (
+              <div key={i} className={cellCls}>
+                <div className="flex justify-center mb-1">
+                  <span className={dayCls}>{day.date()}</span>
+                </div>
+
+                {schedules.map((s, idx) => {
+                  const cancelled = s.status === 'cancelled';
+                  const chipCls = ['text-xs rounded-md px-1.5 py-0.5 mb-0.5 truncate cursor-default leading-5', cancelled ? 'bg-red-50 text-red-500 line-through border border-red-200' : 'bg-blue-50 text-blue-700 border border-blue-200'].join(' ');
+                  const tip = (s.class?.name || '') + ' | ' + formatTime(s.start_time) + ' - ' + formatTime(s.end_time) + (s.room?.name ? ' | ' + s.room.name : '');
+                  return (
+                    <div key={idx} title={tip} className={chipCls}>
+                      <span className="font-semibold">{formatTime(s.start_time)}</span>
+                      {' '}{s.class?.name || 'Lớp học'}
+                      {s.room?.name ? ' · ' + s.room.name : ''}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
     );
   };
 
@@ -376,12 +437,16 @@ export function TeachersPage() {
       <Modal
         title={`Lịch dạy của ${selectedTeacher?.full_name || ''}`}
         open={calendarOpen}
-        onCancel={() => setCalendarOpen(false)}
+        onCancel={() => {
+          setCalendarOpen(false);
+          setCalendarCurrentMonth(dayjs());
+        }}
         footer={null}
-        width="80%"
+        width="90%"
+        style={{ top: 20 }}
       >
-        <Card loading={scheduleLoading}>
-          <Calendar dateCellRender={dateCellRender} />
+        <Card loading={scheduleLoading} styles={{ body: { padding: '12px' } }}>
+          <GCalendar />
         </Card>
       </Modal>
     </div>
