@@ -4,29 +4,44 @@ const config = getApiConfig();
 
 const getAuthHeader = () => ({
   ...config.headers,
+  'Content-Type': 'application/json',
   Authorization: `Bearer ${localStorage.getItem('token')}`,
 });
 
 export const scheduleService = {
-  // GET ALL SCHEDULE
   getAll: async () => {
     const res = await fetch(`${config.baseURL}/schedules`, {
       headers: getAuthHeader(),
     });
 
-    return res.json();
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message);
+
+    return json;
   },
 
-  // GET BY CLASS
+  getMySchedules: async () => {
+    const res = await fetch(`${config.baseURL}/schedules/my/schedules`, {
+      headers: getAuthHeader(),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message);
+
+    return json;
+  },
+
   getByClass: async (classId: number) => {
     const res = await fetch(`${config.baseURL}/schedules/class/${classId}`, {
       headers: getAuthHeader(),
     });
 
-    return res.json();
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message);
+
+    return json;
   },
 
-  // CREATE
   create: async (data: any) => {
     const res = await fetch(`${config.baseURL}/schedules`, {
       method: 'POST',
@@ -40,7 +55,6 @@ export const scheduleService = {
     return json;
   },
 
-  // UPDATE
   update: async (id: number, data: any) => {
     const res = await fetch(`${config.baseURL}/schedules/${id}`, {
       method: 'PUT',
@@ -54,7 +68,6 @@ export const scheduleService = {
     return json;
   },
 
-  // DELETE
   remove: async (id: number) => {
     const res = await fetch(`${config.baseURL}/schedules/${id}`, {
       method: 'DELETE',

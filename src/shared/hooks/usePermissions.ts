@@ -141,9 +141,12 @@ export function usePermissions() {
       canCreateSessions: ['admin'].includes(role),
       canViewClassDashboard: ['admin'].includes(role),
       // Session permissions
-      canTakeAttendance: ['admin', 'teacher'].includes(role),
-      canEditSessionContent: ['admin', 'teacher'].includes(role),
-      canViewSessionNotes: true,
+      // canTakeAttendance: ['admin', 'teacher'].includes(role),
+      // canEditSessionContent: ['admin', 'teacher'].includes(role),
+      // canViewSessionNotes: true,
+      canTakeAttendance: role === 'teacher',
+      canEditSessionContent: role === 'teacher',
+      canViewSessionNotes: ['admin', 'teacher', 'student'].includes(role),
       // Payment permissions
       canViewPaymentDetails: ['admin', 'sale', 'student'].includes(role),
       canEditPaymentDetails: ['admin', 'sale'].includes(role),

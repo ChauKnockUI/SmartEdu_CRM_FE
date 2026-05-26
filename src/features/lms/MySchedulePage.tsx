@@ -1,81 +1,229 @@
-import React, { useState } from 'react';
-import { Card, Table, Tag, Button, Space, Calendar, Badge, Select, Alert, Modal } from 'antd';
-import { CalendarOutlined, ClockCircleOutlined, CheckCircleOutlined, EnvironmentOutlined } from '@ant-design/icons';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Badge,
+  Button,
+  Calendar,
+  Card,
+  message,
+  Modal,
+  Select,
+  Space,
+  Spin,
+  Table,
+  Tag,
+} from 'antd';
+import type { ColumnsType } from 'antd/es/table';
+import type { Dayjs } from 'dayjs';
+import {
+  CalendarOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  EnvironmentOutlined,
+} from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../../shared/contexts/AuthContext';
-import { mockClasses, mockSessions } from '../../services/mock/mockData';
-import type { Dayjs } from 'dayjs';
+import { classService } from '../../services/api/class.service';
+import { scheduleService } from '../../services/api/schedule.service';
 import dayjs from 'dayjs';
 import 'dayjs/locale/vi';
 
 dayjs.locale('vi');
 
-// Mock data for teacher's classes
-const teacherClasses = [
-  { id: 'c1', name: 'IELTS Foundation', schedule: 'T2-4-6: 19:00-21:00', room: 'P301', students: 12 },
-  { id: 'c2', name: 'IELTS Intensive', schedule: 'T3-5: 18:00-20:00', room: 'P302', students: 8 },
-];
+type ViewType = 'list' | 'calendar';
 
-// Mock upcoming sessions for teacher
-const upcomingSessions = [
-  {
-    id: 'sess1',
-    classId: 'c1',
-    className: 'IELTS Foundation',
-    date: new Date(2026, 3, 7), // April 7, 2026 (Monday)
-    startTime: '19:00',
-    endTime: '21:00',
-    room: 'P301',
-    status: 'scheduled',
-  },
-  {
-    id: 'sess2',
-    classId: 'c2',
-    className: 'IELTS Intensive',
-    date: new Date(2026, 3, 8), // April 8, 2026 (Tuesday)
-    startTime: '18:00',
-    endTime: '20:00',
-    room: 'P302',
-    status: 'scheduled',
-  },
-  {
-    id: 'sess3',
-    classId: 'c1',
-    className: 'IELTS Foundation',
-    date: new Date(2026, 3, 9), // April 9, 2026 (Wednesday)
-    startTime: '19:00',
-    endTime: '21:00',
-    room: 'P301',
-    status: 'scheduled',
-  },
-];
+interface MyClass {
+  id: number;
+  name: string;
+  schedule?: string;
+  room?: string;
+  students?: number;
+  status?: string;
+}
+
+interface MySession {
+  id: number;
+  classId?: number;
+  className: string;
+  date: string | Date;
+  startTime?: string | Date | null;
+  endTime?: string | Date | null;
+  room?: string;
+  status: string;
+  attendances?: any[];
+}
+
+const getArrayData = (res: any) => {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.data)) return res.data;
+  if (Array.isArray(res?.data?.data)) return res.data.data;
+  if (Array.isArray(res?.items)) return res.items;
+  if (Array.isArray(res?.classes)) return res.classes;
+  if (Array.isArray(res?.schedules)) return res.schedules;
+  return [];
+};
+
+const formatTime = (value?: string | Date | null) => {
+  if (!value) return 'N/A';
+
+  const text = String(value);
+
+  // ISO datetime
+  const isoMatch = text.match(/T(\d{2}:\d{2})/);
+  if (isoMatch) {
+    return isoMatch[1];
+  }
+
+  if (/^\d{2}:\d{2}/.test(text)) {
+    return text.slice(0, 5);
+  }
+
+  return text;
+};
+
+const formatSchedule = (classItem: any) => {
+  if (classItem.schedule) return classItem.schedule;
+
+  const days = classItem.schedule_days;
+  const time = classItem.schedule_time;
+
+  let daysText = '';
+
+  if (Array.isArray(days)) {
+    daysText = days.join(', ');
+  } else if (typeof days === 'string') {
+    daysText = days;
+  }
+
+  let timeText = '';
+
+  if (Array.isArray(time)) {
+    timeText = time.join(' - ');
+  } else if (typeof time === 'string') {
+    timeText = time;
+  }
+
+  if (!daysText && !timeText) return '-';
+  return `${daysText}${daysText && timeText ? ': ' : ''}${timeText}`;
+};
 
 export function MySchedulePage() {
   const navigate = useNavigate();
-  const { role } = useAuth();
-  const [viewType, setViewType] = useState<'list' | 'calendar'>('calendar');
+  const { user } = useAuth();
+  const role = user?.role;
+
+  const [viewType, setViewType] = useState<ViewType>('list');
+  const [loading, setLoading] = useState(true);
+  const [classes, setClasses] = useState<MyClass[]>([]);
+  const [sessions, setSessions] = useState<MySession[]>([]);
   const [selectedDate, setSelectedDate] = useState(dayjs());
   const [dayDetailVisible, setDayDetailVisible] = useState(false);
-  const [selectedDaySessions, setSelectedDaySessions] = useState<any[]>([]);
+  const [selectedDaySessions, setSelectedDaySessions] = useState<MySession[]>([]);
 
   const isTeacher = role === 'teacher';
+  const isStudent = role === 'student';
 
-  // Get list data based on role
+  useEffect(() => {
+    fetchMyScheduleData();
+  }, []);
+
+  const fetchMyScheduleData = async () => {
+    try {
+      setLoading(true);
+
+      const [classRes, scheduleRes] = await Promise.all([
+        classService.getMyClasses
+          ? classService.getMyClasses()
+          : classService.getAll({ limit: 100 }),
+        scheduleService.getMySchedules
+          ? scheduleService.getMySchedules()
+          : scheduleService.getAll(),
+      ]);
+
+      const classList = getArrayData(classRes).map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        schedule: formatSchedule(item),
+        room: item.room?.name || item.room_name || item.room || '-',
+        students:
+          item.students_count ||
+          item.student_count ||
+          item.classEnrollments?.length ||
+          item.enrollments?.length ||
+          0,
+        status: item.status,
+      }));
+
+      const sessionList = getArrayData(scheduleRes).map((item: any) => {
+        const hasAttendance =
+          Array.isArray(item.attendances) && item.attendances.length > 0;
+
+        return {
+          id: item.id,
+          classId: item.class_id || item.classId || item.class?.id,
+          className: item.class?.name || item.className || item.class_name || '-',
+          date: item.date,
+          startTime: item.start_time || item.startTime,
+          endTime: item.end_time || item.endTime,
+          room: item.room?.name || item.room_name || item.room || '-',
+          status: hasAttendance ? 'attended' : item.status || 'scheduled',
+          attendances: item.attendances || [],
+        };
+      });
+
+      setClasses(classList);
+      setSessions(sessionList);
+    } catch (error: any) {
+      message.error(error.message || 'Lỗi tải lịch học');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const todaySessions = useMemo(() => {
+    return sessions.filter((session) => dayjs(session.date).isSame(dayjs(), 'day'));
+  }, [sessions]);
+
+  const upcomingSessions = useMemo(() => {
+    return sessions
+      .filter((session) => {
+        const sessionDate = dayjs(session.date);
+        return sessionDate.isSame(dayjs(), 'day') || sessionDate.isAfter(dayjs(), 'day');
+      })
+      .sort((a, b) => dayjs(a.date).valueOf() - dayjs(b.date).valueOf());
+  }, [sessions]);
+
+  const nextSession = upcomingSessions[0];
+
+  const weeklyHours = useMemo(() => {
+    return sessions
+      .filter((session) => dayjs(session.date).isSame(dayjs(), 'week'))
+      .reduce((total, session) => {
+        const start = dayjs(session.startTime);
+        const end = dayjs(session.endTime);
+
+        if (!start.isValid() || !end.isValid()) return total;
+
+        return total + Math.max(end.diff(start, 'hour', true), 0);
+      }, 0);
+  }, [sessions]);
+
   const getListData = (value: Dayjs) => {
-    const sessions = upcomingSessions.filter(s => {
-      const sessionDate = dayjs(s.date);
-      return sessionDate.isSame(value, 'day');
-    });
-
-    return sessions.map(s => ({
-      type: s.status === 'completed' ? 'success' : 'warning',
-      content: `${s.startTime} - ${s.className}`,
-    }));
+    return sessions
+      .filter((session) => dayjs(session.date).isSame(value, 'day'))
+      .map((session) => ({
+        type:
+          session.status === 'attended' || session.status === 'completed'
+            ? 'success'
+            : 'processing',
+        content: `${formatTime(session.startTime)} - ${session.className}`,
+      }));
   };
 
   const dateCellRender = (value: Dayjs) => {
     const listData = getListData(value);
+
     return (
       <ul className="events">
         {listData.map((item, index) => (
@@ -89,24 +237,181 @@ export function MySchedulePage() {
 
   const handleDateSelect = (date: Dayjs) => {
     setSelectedDate(date);
-    const sessions = upcomingSessions.filter(s => {
-      const sessionDate = dayjs(s.date);
-      return sessionDate.isSame(date, 'day');
-    });
-    
-    if (sessions.length > 0) {
-      setSelectedDaySessions(sessions);
+
+    const daySessions = sessions.filter((session) =>
+      dayjs(session.date).isSame(date, 'day')
+    );
+
+    if (daySessions.length > 0) {
+      setSelectedDaySessions(daySessions);
       setDayDetailVisible(true);
     }
   };
 
-  const handleAttendance = (sessionId: string) => {
-    // Navigate to class detail to do attendance
-    const session = upcomingSessions.find(s => s.id === sessionId);
-    if (session) {
-      navigate(`/lms/classes/${session.classId}`);
+  const openClassDetail = (classId?: number) => {
+    if (!classId) {
+      message.warning('Không tìm thấy lớp học');
+      return;
     }
+
+    navigate(`/lms/classes/${classId}`);
   };
+
+  const openSessionDetail = (sessionId: number) => {
+    navigate(`/lms/sessions/${sessionId}`);
+  };
+
+  const renderSessionStatus = (status: string) => {
+    if (status === 'attended') {
+      return <Tag color="green">Đã điểm danh</Tag>;
+    }
+
+    if (status === 'completed') {
+      return <Tag color="green">Đã hoàn thành</Tag>;
+    }
+
+    return <Tag color="blue">Chưa điểm danh</Tag>;
+  };
+
+  const classColumns: ColumnsType<MyClass> = [
+    {
+      title: 'Lớp học',
+      dataIndex: 'name',
+      key: 'name',
+      render: (name: string, record) => (
+        <Button type="link" onClick={() => openClassDetail(record.id)}>
+          {name}
+        </Button>
+      ),
+    },
+    {
+      title: 'Lịch học',
+      dataIndex: 'schedule',
+      key: 'schedule',
+      render: (schedule?: string) => schedule || '-',
+    },
+    {
+      title: 'Phòng',
+      dataIndex: 'room',
+      key: 'room',
+      render: (room?: string) => (
+        <Space>
+          <EnvironmentOutlined />
+          {room || '-'}
+        </Space>
+      ),
+    },
+    ...(isTeacher
+      ? [
+        {
+          title: 'Số học viên',
+          dataIndex: 'students',
+          key: 'students',
+          render: (students: number) => `${students || 0} học viên`,
+        },
+      ]
+      : []),
+    {
+      title: 'Trạng thái',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status?: string) => (
+        <Tag color={status === 'active' || status === 'ongoing' ? 'green' : 'blue'}>
+          {status || 'active'}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Thao tác',
+      key: 'action',
+      render: (_, record) => (
+        <Button type="link" size="small" onClick={() => openClassDetail(record.id)}>
+          Chi tiết lớp
+        </Button>
+      ),
+    },
+  ];
+
+  const sessionColumns: ColumnsType<MySession> = [
+    {
+      title: 'Lớp học',
+      dataIndex: 'className',
+      key: 'className',
+      render: (className: string, record) => (
+        <Button type="link" onClick={() => openClassDetail(record.classId)}>
+          {className}
+        </Button>
+      ),
+    },
+    {
+      title: 'Ngày',
+      dataIndex: 'date',
+      key: 'date',
+      render: (date: string | Date) => (
+        <Space>
+          <CalendarOutlined />
+          {dayjs(date).format('dddd, DD/MM/YYYY')}
+        </Space>
+      ),
+    },
+    {
+      title: 'Thời gian',
+      key: 'time',
+      render: (_, record) => (
+        <Space>
+          <ClockCircleOutlined />
+          {formatTime(record.startTime)} - {formatTime(record.endTime)}
+        </Space>
+      ),
+    },
+    {
+      title: 'Phòng',
+      dataIndex: 'room',
+      key: 'room',
+      render: (room?: string) => (
+        <Space>
+          <EnvironmentOutlined />
+          {room || '-'}
+        </Space>
+      ),
+    },
+    {
+      title: 'Trạng thái',
+      dataIndex: 'status',
+      key: 'status',
+      render: (status: string) => renderSessionStatus(status),
+    },
+    {
+      title: 'Thao tác',
+      key: 'action',
+      render: (_, record) => (
+        <Space size="small">
+          {isTeacher && (
+            <Button
+              type="primary"
+              size="small"
+              icon={<CheckCircleOutlined />}
+              onClick={() => openSessionDetail(record.id)}
+            >
+              Điểm danh
+            </Button>
+          )}
+
+          <Button type="link" size="small" onClick={() => openSessionDetail(record.id)}>
+            Chi tiết buổi học
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <Spin size="large" />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -124,40 +429,56 @@ export function MySchedulePage() {
               onChange={setViewType}
               style={{ width: 150 }}
               options={[
-                { label: 'Dạng danh sách', value: 'list', icon: <ClockCircleOutlined /> },
-                { label: 'Dạng lịch', value: 'calendar', icon: <CalendarOutlined /> },
+                { label: 'Dạng danh sách', value: 'list' },
+                { label: 'Dạng lịch', value: 'calendar' },
               ]}
             />
           </Space>
         }
       />
 
-      {/* Today's Alert */}
       <Alert
-        message="Hôm nay - Thứ 2, 01/04/2026"
+        message={`Hôm nay - ${dayjs().format('dddd, DD/MM/YYYY')}`}
         description={
-          <div>
-            <strong>Không có buổi học hôm nay</strong>
-            <div className="mt-2">Buổi học tiếp theo: Thứ 2, 07/04/2026 - IELTS Foundation (19:00-21:00)</div>
-          </div>
+          todaySessions.length > 0 ? (
+            <div>
+              <strong>Có {todaySessions.length} buổi học hôm nay</strong>
+              <div className="mt-2">
+                {todaySessions.map((session) => (
+                  <div key={session.id}>
+                    {formatTime(session.startTime)} - {session.className}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <strong>Không có buổi học hôm nay</strong>
+              {nextSession && (
+                <div className="mt-2">
+                  Buổi học tiếp theo: {dayjs(nextSession.date).format('dddd, DD/MM/YYYY')} -{' '}
+                  {nextSession.className} ({formatTime(nextSession.startTime)} -{' '}
+                  {formatTime(nextSession.endTime)})
+                </div>
+              )}
+            </div>
+          )
         }
         type="info"
         showIcon
         className="mb-6"
       />
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card>
           <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">
-              {isTeacher ? teacherClasses.length : 3}
-            </div>
+            <div className="text-2xl font-bold text-blue-600">{classes.length}</div>
             <div className="text-gray-600 mt-1">
               {isTeacher ? 'Lớp đang dạy' : 'Lớp đang học'}
             </div>
           </div>
         </Card>
+
         <Card>
           <div className="text-center">
             <div className="text-2xl font-bold text-green-600">
@@ -166,19 +487,27 @@ export function MySchedulePage() {
             <div className="text-gray-600 mt-1">Buổi sắp tới</div>
           </div>
         </Card>
+
         <Card>
           <div className="text-center">
-            <div className="text-2xl font-bold text-orange-600">12h</div>
-            <div className="text-gray-600 mt-1">Giờ dạy tuần này</div>
+            <div className="text-2xl font-bold text-orange-600">
+              {Math.round(weeklyHours)}h
+            </div>
+            <div className="text-gray-600 mt-1">
+              {isTeacher ? 'Giờ dạy tuần này' : 'Giờ học tuần này'}
+            </div>
           </div>
         </Card>
+
         <Card>
           <div className="text-center">
             <div className="text-2xl font-bold text-purple-600">
-              {isTeacher ? '20' : '1'}
+              {isTeacher
+                ? classes.reduce((total, item) => total + (item.students || 0), 0)
+                : sessions.filter((item) => item.status === 'completed').length}
             </div>
             <div className="text-gray-600 mt-1">
-              {isTeacher ? 'Tổng học viên' : 'Buổi vắng'}
+              {isTeacher ? 'Tổng học viên' : 'Buổi đã học'}
             </div>
           </div>
         </Card>
@@ -186,160 +515,39 @@ export function MySchedulePage() {
 
       {viewType === 'list' ? (
         <div className="space-y-6">
-          {/* My Classes */}
           <Card title={isTeacher ? 'Lớp đang dạy' : 'Lớp đang học'}>
             <Table
-              dataSource={teacherClasses}
+              dataSource={classes}
               rowKey="id"
               pagination={false}
-              columns={[
-                {
-                  title: 'Lớp học',
-                  dataIndex: 'name',
-                  key: 'name',
-                  render: (name, record: any) => (
-                    <Button
-                      type="link"
-                      onClick={() => navigate(`/lms/classes/${record.id}`)}
-                    >
-                      {name}
-                    </Button>
-                  ),
-                },
-                {
-                  title: 'Lịch học',
-                  dataIndex: 'schedule',
-                  key: 'schedule',
-                },
-                {
-                  title: 'Phòng',
-                  dataIndex: 'room',
-                  key: 'room',
-                  render: (room) => (
-                    <Space>
-                      <EnvironmentOutlined />
-                      {room}
-                    </Space>
-                  ),
-                },
-                ...(isTeacher ? [{
-                  title: 'Số học viên',
-                  dataIndex: 'students',
-                  key: 'students',
-                  render: (students: number) => `${students} học viên`,
-                }] : []),
-                {
-                  title: 'Thao tác',
-                  key: 'action',
-                  render: (_: any, record: any) => (
-                    <Space size="small">
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={() => navigate(`/lms/classes/${record.id}`)}
-                      >
-                        Chi tiết
-                      </Button>
-                    </Space>
-                  ),
-                },
-              ]}
+              columns={classColumns}
+              locale={{
+                emptyText: isTeacher
+                  ? 'Chưa có lớp đang dạy'
+                  : 'Chưa có lớp đang học',
+              }}
             />
           </Card>
 
-          {/* Upcoming Sessions */}
-          <Card title="Buổi học sắp tới">
+          <Card title={isTeacher ? 'Buổi dạy sắp tới' : 'Buổi học sắp tới'}>
             <Table
               dataSource={upcomingSessions}
               rowKey="id"
               pagination={false}
-              columns={[
-                {
-                  title: 'Lớp học',
-                  dataIndex: 'className',
-                  key: 'className',
-                },
-                {
-                  title: 'Ngày',
-                  dataIndex: 'date',
-                  key: 'date',
-                  render: (date: Date) => (
-                    <Space>
-                      <CalendarOutlined />
-                      {date.toLocaleDateString('vi-VN', { weekday: 'short', year: 'numeric', month: '2-digit', day: '2-digit' })}
-                    </Space>
-                  ),
-                },
-                {
-                  title: 'Thời gian',
-                  key: 'time',
-                  render: (_, record) => (
-                    <Space>
-                      <ClockCircleOutlined />
-                      {record.startTime} - {record.endTime}
-                    </Space>
-                  ),
-                },
-                {
-                  title: 'Phòng',
-                  dataIndex: 'room',
-                  key: 'room',
-                  render: (room) => (
-                    <Space>
-                      <EnvironmentOutlined />
-                      {room}
-                    </Space>
-                  ),
-                },
-                {
-                  title: 'Trạng thái',
-                  dataIndex: 'status',
-                  key: 'status',
-                  render: (status: string) => (
-                    <Tag color={status === 'completed' ? 'green' : 'blue'}>
-                      {status === 'completed' ? 'Đã hoàn thành' : 'Sắp diễn ra'}
-                    </Tag>
-                  ),
-                },
-                ...(isTeacher ? [{
-                  title: 'Thao tác',
-                  key: 'action',
-                  render: (_: any, record: any) => (
-                    <Space size="small">
-                      {record.status === 'scheduled' && (
-                        <Button
-                          type="primary"
-                          size="small"
-                          icon={<CheckCircleOutlined />}
-                          onClick={() => handleAttendance(record.id)}
-                        >
-                          Điểm danh
-                        </Button>
-                      )}
-                      <Button
-                        type="link"
-                        size="small"
-                        onClick={() => navigate(`/lms/sessions/${record.id}`)}
-                      >
-                        Chi tiết
-                      </Button>
-                    </Space>
-                  ),
-                }] : []),
-              ]}
+              columns={sessionColumns}
+              locale={{ emptyText: 'Chưa có buổi học sắp tới' }}
             />
           </Card>
         </div>
       ) : (
-        <Card title="Lịch dạy dạng Calendar">
-          <Calendar 
+        <Card title={isTeacher ? 'Lịch dạy dạng Calendar' : 'Lịch học dạng Calendar'}>
+          <Calendar
             dateCellRender={dateCellRender}
             onSelect={(date) => handleDateSelect(date)}
           />
         </Card>
       )}
 
-      {/* Day Detail Modal */}
       <Modal
         title={`Chi tiết lịch - ${selectedDate.format('dddd, DD/MM/YYYY')}`}
         open={dayDetailVisible}
@@ -350,40 +558,54 @@ export function MySchedulePage() {
         <div className="space-y-4">
           {selectedDaySessions.map((session) => (
             <Card key={session.id} size="small">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-4">
                 <div className="flex-1">
                   <h4 className="font-semibold text-lg mb-2">{session.className}</h4>
-                  <Space size="large">
+
+                  <Space size="large" wrap>
                     <Space>
                       <ClockCircleOutlined />
-                      <span>{session.startTime} - {session.endTime}</span>
+                      <span>
+                        {formatTime(session.startTime)} - {formatTime(session.endTime)}
+                      </span>
                     </Space>
+
                     <Space>
                       <EnvironmentOutlined />
-                      <span>{session.room}</span>
+                      <span>{session.room || '-'}</span>
                     </Space>
-                    <Tag color={session.status === 'completed' ? 'green' : 'blue'}>
-                      {session.status === 'completed' ? 'Đã hoàn thành' : 'Sắp diễn ra'}
-                    </Tag>
+
+                    {renderSessionStatus(session.status)}
                   </Space>
                 </div>
+
                 <Space>
-                  {isTeacher && session.status === 'scheduled' && (
+                  {isTeacher && (
                     <Button
                       type="primary"
                       icon={<CheckCircleOutlined />}
                       onClick={() => {
                         setDayDetailVisible(false);
-                        handleAttendance(session.id);
+                        openSessionDetail(session.id);
                       }}
                     >
                       Điểm danh
                     </Button>
                   )}
+
                   <Button
                     onClick={() => {
                       setDayDetailVisible(false);
-                      navigate(`/lms/classes/${session.classId}`);
+                      openSessionDetail(session.id);
+                    }}
+                  >
+                    Chi tiết buổi học
+                  </Button>
+
+                  <Button
+                    onClick={() => {
+                      setDayDetailVisible(false);
+                      openClassDetail(session.classId);
                     }}
                   >
                     Xem lớp học
