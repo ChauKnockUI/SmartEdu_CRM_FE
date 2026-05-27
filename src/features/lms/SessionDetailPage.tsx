@@ -1,393 +1,484 @@
-import React, { useState } from 'react';
-import { Card, Descriptions, Tag, Table, Button, Space, Modal, Form, Input, Select, Checkbox, message, Alert, Divider } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Form,
+  Input,
+  message,
+  Select,
+  Space,
+  Spin,
+  Table,
+  Tag,
+} from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
-  EditOutlined,
   CheckCircleOutlined,
-  CloseCircleOutlined,
   ClockCircleOutlined,
-  FileTextOutlined,
+  CloseCircleOutlined,
+  ExclamationCircleOutlined,
   SaveOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams, useNavigate } from 'react-router';
-import { mockSessions } from '../../services/mock/mockData';
+import { attendanceService } from '../../services/api/attendance.service';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { useAuth } from '../../shared/contexts/AuthContext';
+import dayjs from 'dayjs';
 
-// Mock attendance data
-const mockAttendance = [
-  { id: '1', studentId: 's1', studentName: 'Nguyễn Văn A', status: 'present', note: '' },
-  { id: '2', studentId: 's2', studentName: 'Trần Thị B', status: 'present', note: '' },
-  { id: '3', studentId: 's3', studentName: 'Lê Văn C', status: 'late', note: 'Đến muộn 10 phút' },
-  { id: '4', studentId: 's4', studentName: 'Phạm Thị D', status: 'absent', note: 'Báo nghỉ trước' },
-];
+type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
+
+interface AttendanceRecord {
+  id?: number;
+  student_id: number;
+  studentName: string;
+  email?: string;
+  status: AttendanceStatus;
+  notes: string;
+}
+
+interface SessionData {
+  scheduleId: number;
+  date: Date;
+  startTime: Date | null;
+  endTime: Date | null;
+  className: string;
+  teacherName: string;
+  lessonContent?: string | null;
+  notes?: string | null;
+  enrolledStudents: {
+    id: number;
+    name: string;
+    email: string;
+    attendance: {
+      status: AttendanceStatus;
+      notes: string | null;
+    } | null;
+  }[];
+}
+
+const statusConfig: Record<
+  AttendanceStatus,
+  { color: string; icon: React.ReactNode; label: string }
+> = {
+  present: { color: 'success', icon: <CheckCircleOutlined />, label: 'Có mặt' },
+  absent: { color: 'error', icon: <CloseCircleOutlined />, label: 'Vắng' },
+  late: { color: 'warning', icon: <ClockCircleOutlined />, label: 'Muộn' },
+  excused: { color: 'blue', icon: <CheckCircleOutlined />, label: 'Vắng có phép' },
+};
 
 export function SessionDetailPage() {
-  const { id } = useParams();
+  const { id: scheduleId } = useParams();
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { user } = useAuth();
+  const role = user?.role;
   const permissions = usePermissions();
-  const [attendance, setAttendance] = useState(mockAttendance);
-  const [noteModalVisible, setNoteModalVisible] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
+  const [lessonContent, setLessonContent] = useState('');
   const [editMode, setEditMode] = useState(false);
-  const [form] = Form.useForm();
+  const [saving, setSaving] = useState(false);
 
-  const session = mockSessions.find(s => s.id === id);
+  const canEditAttendance = permissions.canTakeAttendance && role === 'teacher';
+  const canViewFullAttendance = role === 'teacher';
+  const canViewAbsenceList = role === 'admin' || role === 'student';
 
-  if (!session) {
-    return <div>Buổi học không tồn tại</div>;
-  }
+  useEffect(() => {
+    if (scheduleId) {
+      fetchSessionAttendance();
+    }
+  }, [scheduleId]);
 
-  const handleSaveAttendance = () => {
-    message.success('Đã lưu điểm danh');
+  const fetchSessionAttendance = async () => {
+    try {
+      setLoading(true);
+
+      const res = await attendanceService.getSessionAttendance(Number(scheduleId));
+
+      if (res.success && res.data) {
+        const data: SessionData = res.data;
+        setSessionData(data);
+
+        setLessonContent(data.lessonContent || data.notes || '');
+
+        const attendanceRecords: AttendanceRecord[] = data.enrolledStudents.map((student) => ({
+          id: student.id,
+          student_id: student.id,
+          studentName: student.name,
+          email: student.email,
+          status: student.attendance?.status || 'present',
+          notes: student.attendance?.notes || '',
+        }));
+
+        setAttendance(attendanceRecords);
+      }
+    } catch (error: any) {
+      message.error(error.message || 'Lỗi tải dữ liệu điểm danh');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatTime = (value?: string | Date | null) => {
+    if (!value) return 'N/A';
+
+    const text = String(value);
+
+    const isoMatch = text.match(/T(\d{2}:\d{2})/);
+    if (isoMatch) {
+      return isoMatch[1];
+    }
+
+    if (/^\d{2}:\d{2}/.test(text)) {
+      return text.slice(0, 5);
+    }
+
+    return text;
+  };
+
+  const handleSaveAttendance = async () => {
+    try {
+      setSaving(true);
+
+      const attendanceData = attendance.map((rec) => ({
+        student_id: rec.student_id,
+        status: rec.status,
+        notes: rec.notes || undefined,
+      }));
+
+      await attendanceService.markAttendance(Number(scheduleId), {
+        lessonContent,
+        attendances: attendanceData,
+      });
+
+      message.success('Đã lưu điểm danh thành công');
+      setEditMode(false);
+      await fetchSessionAttendance();
+    } catch (error: any) {
+      message.error(error.message || 'Lỗi lưu điểm danh');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
     setEditMode(false);
+    setLessonContent(sessionData?.lessonContent || sessionData?.notes || '');
+
+    const attendanceRecords: AttendanceRecord[] =
+      sessionData?.enrolledStudents.map((student) => ({
+        id: student.id,
+        student_id: student.id,
+        studentName: student.name,
+        email: student.email,
+        status: student.attendance?.status || 'present',
+        notes: student.attendance?.notes || '',
+      })) || [];
+
+    setAttendance(attendanceRecords);
   };
 
-  const handleSaveNotes = (values: any) => {
-    message.success('Đã lưu ghi chú buổi học');
-    setNoteModalVisible(false);
-    form.resetFields();
-  };
-
-  const handleAttendanceChange = (recordId: string, status: string) => {
-    setAttendance(prev =>
-      prev.map(item =>
-        item.id === recordId ? { ...item, status } : item
-      )
+  const handleAttendanceChange = (studentId: number, status: AttendanceStatus) => {
+    setAttendance((prev) =>
+      prev.map((item) => (item.student_id === studentId ? { ...item, status } : item))
     );
   };
 
-  const attendanceColumns: ColumnsType<typeof attendance[0]> = [
+  const handleNotesChange = (studentId: number, notes: string) => {
+    setAttendance((prev) =>
+      prev.map((item) => (item.student_id === studentId ? { ...item, notes } : item))
+    );
+  };
+
+  const absenceList = useMemo(
+    () => attendance.filter((item) => item.status === 'absent' || item.status === 'late' || item.status === 'excused'),
+    [attendance]
+  );
+
+  const summary = useMemo(() => {
+    const present = attendance.filter((a) => a.status === 'present').length;
+    const absent = attendance.filter((a) => a.status === 'absent').length;
+    const late = attendance.filter((a) => a.status === 'late').length;
+    const excused = attendance.filter((a) => a.status === 'excused').length;
+    const total = attendance.length;
+
+    return {
+      present,
+      absent,
+      late,
+      excused,
+      total,
+      rate: total > 0 ? Math.round(((present + late + excused) / total) * 100) : 0,
+    };
+  }, [attendance]);
+
+  const renderStatusTag = (status: AttendanceStatus) => {
+    const config = statusConfig[status];
+
+    return (
+      <Tag icon={config.icon} color={config.color}>
+        {config.label}
+      </Tag>
+    );
+  };
+
+  const attendanceColumns: ColumnsType<AttendanceRecord> = [
     {
       title: 'Học viên',
       dataIndex: 'studentName',
       key: 'studentName',
-      render: (name: string, record) => (
+      width: 220,
+      render: (name: string, record) =>
         role !== 'student' ? (
-          <Button type="link" onClick={() => navigate(`/lms/students/${record.studentId}`)}>
+          <Button type="link" onClick={() => navigate(`/lms/students/${record.student_id}`)}>
             {name}
           </Button>
-        ) : name
-      ),
+        ) : (
+          name
+        ),
+    },
+    {
+      title: 'Email',
+      dataIndex: 'email',
+      key: 'email',
+      width: 220,
+      render: (email?: string) => email || '-',
     },
     {
       title: 'Trạng thái',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string, record) => {
-        if (permissions.canTakeAttendance && editMode) {
+      width: 170,
+      render: (status: AttendanceStatus, record) => {
+        if (canEditAttendance && editMode) {
           return (
             <Select
               value={status}
-              style={{ width: 120 }}
-              onChange={(value) => handleAttendanceChange(record.id, value)}
+              style={{ width: '100%' }}
+              onChange={(value) => handleAttendanceChange(record.student_id, value)}
               options={[
-                { label: 'Có mặt', value: 'present', icon: <CheckCircleOutlined /> },
-                { label: 'Vắng', value: 'absent', icon: <CloseCircleOutlined /> },
-                { label: 'Muộn', value: 'late', icon: <ClockCircleOutlined /> },
+                { label: 'Có mặt', value: 'present' },
+                { label: 'Vắng', value: 'absent' },
+                { label: 'Muộn', value: 'late' },
+                { label: 'Vắng có phép', value: 'excused' },
               ]}
             />
           );
         }
 
-        if (status === 'present') {
-          return <Tag icon={<CheckCircleOutlined />} color="success">Có mặt</Tag>;
-        }
-        if (status === 'absent') {
-          return <Tag icon={<CloseCircleOutlined />} color="error">Vắng</Tag>;
-        }
-        if (status === 'late') {
-          return <Tag icon={<ClockCircleOutlined />} color="warning">Muộn</Tag>;
-        }
-        return <Tag>{status}</Tag>;
+        return renderStatusTag(status);
       },
     },
     {
       title: 'Ghi chú',
-      dataIndex: 'note',
-      key: 'note',
-      render: (note: string, record) => {
-        if (permissions.canTakeAttendance && editMode) {
+      dataIndex: 'notes',
+      key: 'notes',
+      render: (notes: string, record) => {
+        if (canEditAttendance && editMode) {
           return (
             <Input
-              value={note}
+              value={notes}
               placeholder="Nhập ghi chú..."
-              onChange={(e) => {
-                setAttendance(prev =>
-                  prev.map(item =>
-                    item.id === record.id ? { ...item, note: e.target.value } : item
-                  )
-                );
-              }}
+              onChange={(e) => handleNotesChange(record.student_id, e.target.value)}
             />
           );
         }
-        return note || '-';
+
+        return notes || '-';
       },
     },
   ];
 
-  // Build action buttons based on role
+  const absenceColumns: ColumnsType<AttendanceRecord> = [
+    {
+      title: 'Học viên',
+      dataIndex: 'studentName',
+      key: 'studentName',
+    },
+    {
+      title: 'Trạng thái',
+      dataIndex: 'status',
+      key: 'status',
+      width: 180,
+      render: (status: AttendanceStatus) => renderStatusTag(status),
+    },
+  ];
+
   const buildActions = () => {
-    const actions: React.ReactNode[] = [];
-
-    if (permissions.canTakeAttendance && session.status === 'scheduled') {
-      if (!editMode) {
-        actions.push(
-          <Button key="take-attendance" type="primary" icon={<CheckCircleOutlined />} onClick={() => setEditMode(true)}>
-            Bắt đầu điểm danh
-          </Button>
-        );
-      } else {
-        actions.push(
-          <Button key="save-attendance" type="primary" icon={<SaveOutlined />} onClick={handleSaveAttendance}>
-            Lưu điểm danh
-          </Button>,
-          <Button key="cancel" onClick={() => setEditMode(false)}>
-            Hủy
-          </Button>
-        );
-      }
+    if (!canEditAttendance) {
+      return null;
     }
 
-    if (permissions.canEditSessionContent) {
-      actions.push(
-        <Button key="edit" icon={<EditOutlined />}>
-          Chỉnh sửa buổi học
+    if (!editMode) {
+      return (
+        <Button
+          type="primary"
+          icon={<CheckCircleOutlined />}
+          onClick={() => setEditMode(true)}
+        >
+          Bắt đầu điểm danh
         </Button>
       );
     }
 
-    if (role === 'teacher') {
-      actions.push(
-        <Button key="notes" icon={<FileTextOutlined />} onClick={() => setNoteModalVisible(true)}>
-          Ghi chú bài giảng
+    return (
+      <Space>
+        <Button
+          type="primary"
+          icon={<SaveOutlined />}
+          onClick={handleSaveAttendance}
+          loading={saving}
+        >
+          Lưu điểm danh
         </Button>
-      );
-    }
-
-    if (role === 'admin' && session.status === 'completed') {
-      actions.push(
-        <Button key="export" icon={<FileTextOutlined />}>
-          Export điểm danh
-        </Button>
-      );
-    }
-
-    return <Space>{actions}</Space>;
+        <Button onClick={handleCancelEdit}>Hủy</Button>
+      </Space>
+    );
   };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <Spin size="large" />
+      </div>
+    );
+  }
+
+  if (!sessionData) {
+    return (
+      <div className="p-8 text-center">
+        <ExclamationCircleOutlined className="text-4xl text-yellow-500 mb-4" />
+        <h2 className="text-xl font-semibold mb-2">Buổi học không tồn tại</h2>
+      </div>
+    );
+  }
 
   return (
     <div>
       <PageHeader
-        title={`Buổi ${session.id} - ${session.date.toLocaleDateString('vi-VN')}`}
+        title={`Buổi học - ${dayjs(sessionData.date).format('DD/MM/YYYY')}`}
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'LMS' },
           { title: 'Lớp học', href: '/lms/classes' },
-          { title: 'Chi tiết lớp', href: `/lms/classes/${session.class_id}` },
-          { title: 'Buổi học' },
+          { title: 'Chi tiết lớp' },
+          { title: 'Điểm danh' },
         ]}
         actions={buildActions()}
       />
 
       <div className="space-y-6">
-        {/* Session Info */}
         <Card title="Thông tin buổi học">
           <Descriptions column={2} bordered>
             <Descriptions.Item label="Ngày học">
-              {session.date.toLocaleDateString('vi-VN')}
+              {dayjs(sessionData.date).format('DD/MM/YYYY')}
             </Descriptions.Item>
+
             <Descriptions.Item label="Thời gian">
-              {session.start_time} - {session.end_time}
+              {formatTime(sessionData.startTime)} - {formatTime(sessionData.endTime)}
             </Descriptions.Item>
-            {role !== 'student' && (
-              <Descriptions.Item label="Giảng viên">
-                {session.teacher || 'N/A'}
-              </Descriptions.Item>
-            )}
-            <Descriptions.Item label="Phòng / Link">
-              P301 (Online: meet.google.com/xyz)
-            </Descriptions.Item>
-            <Descriptions.Item label="Trạng thái">
-              <Tag color={session.status === 'completed' ? 'green' : session.status === 'cancelled' ? 'red' : 'blue'}>
-                {session.status === 'completed' ? 'Đã học' : session.status === 'cancelled' ? 'Đã hủy' : 'Đã lên lịch'}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="Chủ đề">
-              IELTS Reading - Strategies & Practice
-            </Descriptions.Item>
+
+            <Descriptions.Item label="Lớp học">{sessionData.className}</Descriptions.Item>
+
+            <Descriptions.Item label="Giảng viên">{sessionData.teacherName}</Descriptions.Item>
           </Descriptions>
         </Card>
 
-        {/* Lesson Content - for all roles */}
         <Card title="Nội dung buổi học">
-          <div className="space-y-4">
-            <div>
-              <h4 className="font-semibold mb-2">Outline:</h4>
-              <ul className="list-disc list-inside space-y-1 text-gray-700">
-                <li>Review từ vựng tuần trước (15 phút)</li>
-                <li>Giảng chiến lược Reading - Skimming & Scanning (30 phút)</li>
-                <li>Practice với bài tập mẫu (45 phút)</li>
-                <li>Q&A và bài tập về nhà (15 phút)</li>
-              </ul>
+          {canEditAttendance && editMode ? (
+            <Input.TextArea
+              value={lessonContent}
+              onChange={(e) => setLessonContent(e.target.value)}
+              placeholder="Nhập nội dung buổi học..."
+              autoSize={{ minRows: 4, maxRows: 8 }}
+              maxLength={2000}
+              showCount
+            />
+          ) : (
+            <div className="whitespace-pre-line min-h-[80px] text-gray-700">
+              {lessonContent || 'Chưa có nội dung buổi học'}
             </div>
-
-            <Divider />
-
-            <div>
-              <h4 className="font-semibold mb-2">Tài liệu:</h4>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between border rounded p-3">
-                  <span>IELTS Reading Strategies.pdf</span>
-                  <Button type="link" size="small">Tải xuống</Button>
-                </div>
-                <div className="flex items-center justify-between border rounded p-3">
-                  <span>Practice Test - Reading.pdf</span>
-                  <Button type="link" size="small">Tải xuống</Button>
-                </div>
-              </div>
-            </div>
-
-            <Divider />
-
-            <div>
-              <h4 className="font-semibold mb-2">Bài tập về nhà:</h4>
-              <p className="text-gray-700">
-                - Hoàn thành Practice Test 2 (Reading Section)<br />
-                - Học thuộc 50 từ vựng mới từ bài đọc<br />
-                - Nộp bài trước thứ 4 tuần sau
-              </p>
-            </div>
-          </div>
+          )}
         </Card>
 
-        {/* Attendance - admin and teacher can see all, student sees own */}
-        {(permissions.canTakeAttendance || role === 'student') && (
-          <Card
-            title="Điểm danh"
-            extra={
-              editMode && permissions.canTakeAttendance && (
-                <Alert
-                  message="Đang trong chế độ điểm danh"
-                  type="info"
-                  showIcon
-                  closable={false}
-                />
-              )
-            }
-          >
-            {role === 'sale' ? (
-              <Alert
-                message="Chỉ xem"
-                description="Bạn chỉ có thể xem danh sách điểm danh, không thể chỉnh sửa."
-                type="info"
-                showIcon
-                className="mb-4"
-              />
-            ) : null}
+        {canEditAttendance && editMode && (
+          <Alert
+            message="Đang trong chế độ điểm danh"
+            description="Bạn có thể nhập nội dung buổi học, chỉnh trạng thái và ghi chú cho từng học viên. Nhấn Lưu điểm danh để cập nhật dữ liệu."
+            type="info"
+            showIcon
+          />
+        )}
 
-            {role === 'student' ? (
-              <div className="p-6 bg-gray-50 rounded text-center">
-                <CheckCircleOutlined className="text-4xl text-green-500 mb-3" />
-                <h3 className="text-lg font-semibold mb-2">Bạn đã tham gia buổi học này</h3>
-                <p className="text-gray-600">Trạng thái: <Tag color="success">Có mặt</Tag></p>
-                {session.status === 'scheduled' && (
-                  <p className="text-gray-500 mt-2">Nhớ tham gia đúng giờ nhé!</p>
-                )}
-              </div>
-            ) : (
-              <Table
-                dataSource={attendance}
-                rowKey="id"
-                columns={attendanceColumns}
-                pagination={false}
-                summary={() => {
-                  const present = attendance.filter(a => a.status === 'present').length;
-                  const absent = attendance.filter(a => a.status === 'absent').length;
-                  const late = attendance.filter(a => a.status === 'late').length;
+        {canViewFullAttendance && (
+          <Card title="Bảng điểm danh">
+            <Table
+              dataSource={attendance}
+              rowKey="student_id"
+              columns={attendanceColumns}
+              pagination={false}
+              scroll={{ x: 800 }}
+              summary={() => (
+                <Table.Summary fixed>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0}>
+                      <strong>Tổng kết</strong>
+                    </Table.Summary.Cell>
 
-                  return (
-                    <Table.Summary fixed>
-                      <Table.Summary.Row>
-                        <Table.Summary.Cell index={0}>
-                          <strong>Tổng kết</strong>
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={1}>
-                          <Space>
-                            <Tag color="success">{present} Có mặt</Tag>
-                            <Tag color="error">{absent} Vắng</Tag>
-                            <Tag color="warning">{late} Muộn</Tag>
-                          </Space>
-                        </Table.Summary.Cell>
-                        <Table.Summary.Cell index={2}>
-                          Tỉ lệ tham gia: {Math.round((present + late) / attendance.length * 100)}%
-                        </Table.Summary.Cell>
-                      </Table.Summary.Row>
-                    </Table.Summary>
-                  );
-                }}
-              />
-            )}
+                    <Table.Summary.Cell index={1}>
+                      Tổng: {summary.total}
+                    </Table.Summary.Cell>
+
+                    <Table.Summary.Cell index={2}>
+                      <Space wrap>
+                        <Tag color="success">{summary.present} Có mặt</Tag>
+                        <Tag color="error">{summary.absent} Vắng</Tag>
+                        <Tag color="warning">{summary.late} Muộn</Tag>
+                        <Tag color="blue">{summary.excused} Vắng có phép</Tag>
+                      </Space>
+                    </Table.Summary.Cell>
+
+                    <Table.Summary.Cell index={3}>
+                      Tỉ lệ tham gia: {summary.rate}%
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
           </Card>
         )}
 
-        {/* Teacher Notes - only for admin and teacher */}
-        {(role === 'admin' || role === 'teacher') && (
-          <Card title="Ghi chú buổi học">
-            {session.status === 'completed' ? (
-              <div className="bg-gray-50 p-4 rounded">
-                <p className="text-gray-700 mb-2">
-                  <strong>Nội dung đã giảng:</strong> Hoàn thành đầy đủ theo outline. Học viên tương tác tốt.
-                </p>
-                <p className="text-gray-700 mb-2">
-                  <strong>Đánh giá lớp:</strong> Lớp rất tích cực trong phần practice. Một số bạn còn yếu về vocabulary.
-                </p>
-                <p className="text-gray-700">
-                  <strong>Lưu ý buổi sau:</strong> Cần dành thêm 10 phút review vocab. Bổ sung thêm bài tập khó hơn cho nhóm giỏi.
-                </p>
-              </div>
+        {canViewAbsenceList && (
+          <Card title="Danh sách vắng / muộn">
+            <Table
+              dataSource={absenceList}
+              rowKey="student_id"
+              columns={absenceColumns}
+              pagination={false}
+              locale={{ emptyText: 'Không có học viên vắng hoặc muộn' }}
+            />
+          </Card>
+        )}
+
+        {role === 'student' && (
+          <Card title="Trạng thái của bạn">
+            {attendance[0] ? (
+              <Space direction="vertical">
+                <div>{renderStatusTag(attendance[0].status)}</div>
+                <div className="text-gray-600">
+                  Ghi chú: {attendance[0].notes || 'Không có ghi chú'}
+                </div>
+              </Space>
             ) : (
-              <p className="text-gray-500">Chưa có ghi chú cho buổi học này.</p>
+              <Alert message="Chưa có dữ liệu điểm danh cho bạn" type="info" showIcon />
             )}
           </Card>
         )}
       </div>
-
-      {/* Notes Modal */}
-      <Modal
-        title="Ghi chú bài giảng"
-        open={noteModalVisible}
-        onCancel={() => setNoteModalVisible(false)}
-        footer={null}
-        width={600}
-      >
-        <Form form={form} layout="vertical" onFinish={handleSaveNotes}>
-          <Form.Item name="content" label="Nội dung đã giảng" rules={[{ required: true }]}>
-            <Input.TextArea rows={3} placeholder="Mô tả những gì đã giảng trong buổi học..." />
-          </Form.Item>
-
-          <Form.Item name="classEvaluation" label="Đánh giá lớp">
-            <Input.TextArea rows={3} placeholder="Đánh giá sự tham gia, tiếp thu của lớp..." />
-          </Form.Item>
-
-          <Form.Item name="nextSessionNote" label="Lưu ý buổi sau">
-            <Input.TextArea rows={2} placeholder="Các điểm cần lưu ý cho buổi học tiếp theo..." />
-          </Form.Item>
-
-          <Form.Item>
-            <Space>
-              <Button type="primary" htmlType="submit">
-                Lưu ghi chú
-              </Button>
-              <Button onClick={() => setNoteModalVisible(false)}>
-                Hủy
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
 }

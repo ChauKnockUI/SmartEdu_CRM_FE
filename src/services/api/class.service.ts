@@ -4,8 +4,10 @@ const config = getApiConfig();
 
 const getAuthHeader = () => {
   const token = localStorage.getItem('token');
+
   return {
     ...config.headers,
+    'Content-Type': 'application/json',
     Authorization: `Bearer ${token}`,
   };
 };
@@ -23,6 +25,17 @@ export const classService = {
     const query = new URLSearchParams(params as any).toString();
 
     const res = await fetch(`${config.baseURL}/classes?${query}`, {
+      headers: getAuthHeader(),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message);
+
+    return json;
+  },
+
+  getMyClasses: async () => {
+    const res = await fetch(`${config.baseURL}/classes/my/classes`, {
       headers: getAuthHeader(),
     });
 
