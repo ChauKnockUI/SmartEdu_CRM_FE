@@ -1,9 +1,8 @@
-import React from 'react';
-import { Card, Row, Col, Table, Tag, Progress } from 'antd';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { PageHeader } from '../../shared/components/PageHeader';
-import { mockLeads, mockAIPredictions } from '../../services/mock/mockData';
+import { Alert, Card, Col, Progress, Row, Table, Tag } from 'antd';
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { ColumnsType } from 'antd/es/table';
+import { PageHeader } from '../../shared/components/PageHeader';
+import { mockAIPredictions, mockLeads } from '../../services/mock/mockData';
 
 const scoreDistributionData = [
   { range: '0-20', leads: 5, students: 2 },
@@ -15,77 +14,62 @@ const scoreDistributionData = [
 
 export function AIInsightsPage() {
   const highScoreLeads = mockLeads
-    .filter(l => l.score >= 80)
+    .filter((lead) => lead.score >= 80)
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
   const highRiskPredictions = mockAIPredictions
-    .filter(p => p.risk === 'high')
+    .filter((prediction) => prediction.risk === 'high')
     .slice(0, 5);
 
-  const leadsColumns: ColumnsType<typeof highScoreLeads[0]> = [
-    {
-      title: 'Tên',
-      dataIndex: 'name',
-      key: 'name',
-    },
-    {
-      title: 'Nguồn',
-      dataIndex: 'source',
-      key: 'source',
-    },
+  const leadsColumns: ColumnsType<(typeof highScoreLeads)[0]> = [
+    { title: 'Tên', dataIndex: 'name', key: 'name' },
+    { title: 'Nguồn', dataIndex: 'source', key: 'source' },
     {
       title: 'Điểm',
       dataIndex: 'score',
       key: 'score',
-      render: (score: number) => (
-        <Progress percent={score} size="small" status="success" />
-      ),
+      render: (score: number) => <Progress percent={score} size="small" status="success" />,
     },
   ];
 
-  const predictionsColumns: ColumnsType<typeof highRiskPredictions[0]> = [
-    {
-      title: 'Target ID',
-      dataIndex: 'targetId',
-      key: 'targetId',
-    },
+  const predictionsColumns: ColumnsType<(typeof highRiskPredictions)[0]> = [
+    { title: 'Target ID', dataIndex: 'targetId', key: 'targetId' },
     {
       title: 'Loại',
       dataIndex: 'targetType',
       key: 'targetType',
-      render: (type: string) => (
-        <Tag>{type === 'lead' ? 'Lead' : 'Học viên'}</Tag>
-      ),
+      render: (type: string) => <Tag>{type === 'lead' ? 'Lead' : 'Học viên'}</Tag>,
     },
     {
       title: 'Rủi ro',
       dataIndex: 'risk',
       key: 'risk',
-      render: (risk: string) => (
-        <Tag color="red">Cao</Tag>
-      ),
+      render: () => <Tag color="red">Cao</Tag>,
     },
-    {
-      title: 'Điểm',
-      dataIndex: 'score',
-      key: 'score',
-    },
+    { title: 'Điểm', dataIndex: 'score', key: 'score' },
   ];
 
   return (
     <div>
       <PageHeader
-        title="AI Insights"
+        title="Demo Insights"
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'AI & Insights' },
-          { title: 'Insights' },
+          { title: 'Demo Insights' },
         ]}
       />
 
-      {/* Score Distribution Chart */}
-      <Card title="Phân phối điểm AI" className="mb-6">
+      <Alert
+        type="info"
+        showIcon
+        className="mb-4"
+        message="Màn hình này đang dùng dữ liệu mẫu để minh họa insight."
+        description="Luồng demo chính nên dùng AI Predictions vì màn hình đó lấy dữ liệu dropout risk thật từ học viên."
+      />
+
+      <Card title="Phân phối điểm AI" className="mb-4">
         <ResponsiveContainer width="100%" height={300}>
           <BarChart data={scoreDistributionData}>
             <CartesianGrid strokeDasharray="3 3" />
@@ -93,27 +77,18 @@ export function AIInsightsPage() {
             <YAxis />
             <Tooltip />
             <Legend />
-            <Bar dataKey="leads" name="Leads" fill="#8884d8" />
-            <Bar dataKey="students" name="Học viên" fill="#82ca9d" />
+            <Bar dataKey="leads" name="Leads" fill="#1677ff" />
+            <Bar dataKey="students" name="Học viên" fill="#52c41a" />
           </BarChart>
         </ResponsiveContainer>
       </Card>
 
       <Row gutter={[16, 16]}>
-        {/* Top High Score Leads */}
         <Col xs={24} lg={12}>
-          <Card title="Top Leads điểm cao" className="h-full">
-            <Table
-              columns={leadsColumns}
-              dataSource={highScoreLeads}
-              rowKey="id"
-              pagination={false}
-              size="small"
-            />
+          <Card title="Top leads điểm cao" className="h-full">
+            <Table columns={leadsColumns} dataSource={highScoreLeads} rowKey="id" pagination={false} size="small" />
           </Card>
         </Col>
-
-        {/* High Risk Predictions */}
         <Col xs={24} lg={12}>
           <Card title="Cảnh báo rủi ro cao" className="h-full">
             <Table

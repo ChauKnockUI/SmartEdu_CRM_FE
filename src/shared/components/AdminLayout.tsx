@@ -1,55 +1,76 @@
-import React, { useState } from 'react';
-import { Layout, Menu, Avatar, Badge, Dropdown, Input, Button, Select, MenuProps, Space } from 'antd';
+import { useState } from 'react';
+import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, type MenuProps } from 'antd';
 import {
-  DashboardOutlined,
-  UserOutlined,
-  TeamOutlined,
-  BookOutlined,
-  HomeOutlined,
-  RobotOutlined,
-  SettingOutlined,
   BellOutlined,
-  SearchOutlined,
+  BookOutlined,
+  CalendarOutlined,
+  CustomerServiceOutlined,
+  DashboardOutlined,
+  DollarOutlined,
+  HomeOutlined,
+  LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  LogoutOutlined,
-  CustomerServiceOutlined,
-  ReadOutlined,
-  CalendarOutlined,
-  DollarOutlined,
-  SwapOutlined,
   QuestionCircleOutlined,
+  ReadOutlined,
+  RobotOutlined,
+  SearchOutlined,
+  SettingOutlined,
+  SwapOutlined,
+  TeamOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
-import { Outlet, useNavigate, useLocation } from 'react-router';
-import { mockNotifications } from '../../services/mock/mockData';
-import { useAuth } from '../contexts/AuthContext';
-import type { UserRole } from '../contexts/AuthContext';
+import { Outlet, useLocation, useNavigate } from 'react-router';
+import { useAuth, type UserRole } from '../contexts/AuthContext';
 import { RoleGuide } from './RoleGuide';
 
 const { Header, Sider, Content } = Layout;
-
 type MenuItem = Required<MenuProps>['items'][number];
 
-function getItem(
-  label: React.ReactNode,
-  key: string,
-  icon?: React.ReactNode,
-  children?: MenuItem[],
-): MenuItem {
-  return {
-    key,
-    icon,
-    children,
-    label,
-  } as MenuItem;
+function getItem(label: string, key: string, icon?: React.ReactNode, children?: MenuItem[]): MenuItem {
+  return { key, icon, children, label } as MenuItem;
 }
 
-// Helper function to filter menu items based on role
 function getMenuItemsForRole(role: UserRole): MenuItem[] {
-  const allItems: MenuItem[] = [
+  if (role === 'sale') {
+    return [
+      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
+      getItem('CRM', '/crm', <CustomerServiceOutlined />, [
+        getItem('Quản lý leads', '/crm/leads', <UserOutlined />),
+      ]),
+      getItem('Tài chính', '/finance', <DollarOutlined />, [
+        getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
+        getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
+        getItem('Công nợ', '/finance/debts', <DollarOutlined />),
+      ]),
+    ];
+  }
+
+  if (role === 'teacher') {
+    return [
+      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
+      getItem('LMS', '/lms', <BookOutlined />, [
+        getItem('Lịch dạy', '/lms/myschedule', <CalendarOutlined />),
+        getItem('Lớp học', '/lms/classes', <BookOutlined />),
+      ]),
+      getItem('AI Predictions', '/ai/predictions', <RobotOutlined />),
+    ];
+  }
+
+  if (role === 'student') {
+    return [
+      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
+      getItem('LMS', '/lms', <BookOutlined />, [
+        getItem('Lịch học của tôi', '/lms/myschedule', <CalendarOutlined />),
+        getItem('Lớp học của tôi', '/lms/classes', <BookOutlined />),
+      ]),
+    ];
+  }
+
+  return [
     getItem('Dashboard', '/dashboard', <DashboardOutlined />),
     getItem('CRM', '/crm', <CustomerServiceOutlined />, [
-      getItem('Quản lý Leads', '/crm/leads', <UserOutlined />),
+      getItem('Quản lý leads', '/crm/leads', <UserOutlined />),
     ]),
     getItem('LMS', '/lms', <BookOutlined />, [
       getItem('Học viên', '/lms/students', <TeamOutlined />),
@@ -58,6 +79,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('Phòng học', '/lms/rooms', <HomeOutlined />),
       getItem('Lớp học', '/lms/classes', <BookOutlined />),
       getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
+      getItem('Xếp lớp', '/lms/scheduling', <SwapOutlined />),
     ]),
     getItem('Tài chính', '/finance', <DollarOutlined />, [
       getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
@@ -67,88 +89,12 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
     getItem('AI & Insights', '/ai', <RobotOutlined />, [
       getItem('Models', '/ai/models', <RobotOutlined />),
       getItem('Predictions', '/ai/predictions', <DashboardOutlined />),
-      getItem('Insights', '/ai/insights', <DashboardOutlined />),
+      getItem('Demo Insights', '/ai/insights', <DashboardOutlined />),
     ]),
     getItem('Cài đặt', '/settings', <SettingOutlined />, [
       getItem('Người dùng', '/settings/users', <TeamOutlined />),
     ]),
   ];
-
-  switch (role) {
-    case 'admin':
-      // Admin sees everything + Scheduling
-      return [
-        getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-        getItem('CRM', '/crm', <CustomerServiceOutlined />, [
-          getItem('Quản lý Leads', '/crm/leads', <UserOutlined />),
-        ]),
-        getItem('LMS', '/lms', <BookOutlined />, [
-          getItem('Học viên', '/lms/students', <TeamOutlined />),
-          getItem('Giảng viên', '/lms/teachers', <ReadOutlined />),
-          getItem('Khóa học', '/lms/courses', <ReadOutlined />),
-          getItem('Phòng học', '/lms/rooms', <HomeOutlined />), 
-          getItem('Lớp học', '/lms/classes', <BookOutlined />),
-          getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
-          getItem('Xếp lớp', '/lms/scheduling', <SwapOutlined />),
-        ]),
-        getItem('Tài chính', '/finance', <DollarOutlined />, [
-          getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
-          getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
-          getItem('Công nợ', '/finance/debts', <DollarOutlined />),
-        ]),
-        getItem('AI & Insights', '/ai', <RobotOutlined />, [
-          getItem('Models', '/ai/models', <RobotOutlined />),
-          getItem('Predictions', '/ai/predictions', <DashboardOutlined />),
-          getItem('Insights', '/ai/insights', <DashboardOutlined />),
-        ]),
-        getItem('Cài đặt', '/settings', <SettingOutlined />, [
-          getItem('Người dùng', '/settings/users', <TeamOutlined />),
-        ]),
-      ];
-
-    case 'sale':
-      // Sale sees: Dashboard, CRM, LMS (students, classes, schedule), Finance (payments)
-      return [
-        getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-        getItem('CRM', '/crm', <CustomerServiceOutlined />, [
-          getItem('Quản lý Leads', '/crm/leads', <UserOutlined />),
-        ]),
-        getItem('LMS', '/lms', <BookOutlined />, [
-          getItem('Học viên', '/lms/students', <TeamOutlined />),
-          getItem('Khóa học', '/lms/courses', <ReadOutlined />),
-          getItem('Lớp học', '/lms/classes', <BookOutlined />),
-          getItem('Lịch học', '/lms/schedule', <CalendarOutlined />),
-        ]),
-        getItem('Tài chính', '/finance', <DollarOutlined />, [
-          getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
-          getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
-          getItem('Công nợ', '/finance/debts', <DollarOutlined />),
-        ]),
-      ];
-
-    case 'teacher':
-      // Teacher sees: Dashboard, LMS (my schedule, classes only - students are managed within classes)
-      return [
-        getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-        getItem('LMS', '/lms', <BookOutlined />, [
-          getItem('Lịch dạy', '/lms/myschedule', <CalendarOutlined />),
-          getItem('Lớp học', '/lms/classes', <BookOutlined />),
-        ]),
-      ];
-
-    case 'student':
-      // Student sees: Dashboard, LMS (my classes, my schedule)
-      return [
-        getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-        getItem('LMS', '/lms', <BookOutlined />, [
-          getItem('Lịch học của tôi', '/lms/myschedule', <CalendarOutlined />),
-          getItem('Lớp học của tôi', '/lms/classes', <BookOutlined />),
-        ]),
-      ];
-
-    default:
-      return allItems;
-  }
 }
 
 export function AdminLayout() {
@@ -156,57 +102,31 @@ export function AdminLayout() {
   const [guideVisible, setGuideVisible] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout} = useAuth();
-
-  const unreadCount = mockNotifications.filter(n => !n.is_read).length;
+  const { user, logout } = useAuth();
 
   const handleLogout = () => {
     logout();
     navigate('/login');
   };
-  
+
   const userMenuItems: MenuProps['items'] = [
-    {
-      key: 'profile',
-      icon: <UserOutlined />,
-      label: 'Thông tin tài khoản',
-    },
-    {
-      key: 'settings',
-      icon: <SettingOutlined />,
-      label: 'Cài đặt',
-    },
-    {
-      key: 'divider-1',
-      type: 'divider',
-    },
-    {
-      key: 'logout',
-      icon: <LogoutOutlined />,
-      label: 'Đăng xuất',
-      danger: true,
-      onClick: handleLogout,
-    },
+    { key: 'profile', icon: <UserOutlined />, label: 'Thông tin tài khoản' },
+    { key: 'settings', icon: <SettingOutlined />, label: 'Cài đặt' },
+    { key: 'divider-1', type: 'divider' },
+    { key: 'logout', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true, onClick: handleLogout },
   ];
 
-  const notificationItems: MenuProps['items'] = mockNotifications.map(notification => ({
-    key: notification.id,
-    label: (
-      <div className="py-2" style={{ width: 300 }}>
-        <div className="font-semibold">{notification.title}</div>
-        <div className="text-sm text-gray-600">{notification.content}</div>
-        <div className="text-xs text-gray-400 mt-1">
-          {notification.interaction_time.toLocaleString('vi-VN')}
+  const notificationItems: MenuProps['items'] = [
+    {
+      key: 'empty',
+      disabled: true,
+      label: (
+        <div style={{ width: 280 }}>
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có thông báo mới" />
         </div>
-      </div>
-    ),
-    onClick: () => notification.link && navigate(notification.link),
-  }));
-
-  const handleMenuClick = ({ key }: { key: string }) => {
-    navigate(key);
-  };
-
+      ),
+    },
+  ];
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -214,36 +134,26 @@ export function AdminLayout() {
         trigger={null}
         collapsible
         collapsed={collapsed}
-        width={250}
-        style={{
-          overflow: 'auto',
-          height: '100vh',
-          position: 'fixed',
-          left: 0,
-          top: 0,
-          bottom: 0,
-        }}
+        width={248}
+        style={{ overflow: 'auto', height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0 }}
       >
         <div className="h-16 flex items-center justify-center border-b border-gray-700">
-          {!collapsed ? (
-            <h1 className="text-white text-xl font-bold">EduCRM System</h1>
-          ) : (
-            <h1 className="text-white text-xl font-bold">EC</h1>
-          )}
+          <h1 className="text-white text-lg font-semibold">{collapsed ? 'SE' : 'SmartEdu CRM'}</h1>
         </div>
         <Menu
           theme="dark"
           mode="inline"
           selectedKeys={[location.pathname]}
-          defaultOpenKeys={['/crm', '/lms', '/ai']}
+          defaultOpenKeys={['/crm', '/lms', '/finance', '/ai', '/settings']}
           items={getMenuItemsForRole(user?.role || 'admin')}
-          onClick={handleMenuClick}
+          onClick={({ key }) => navigate(key)}
         />
       </Sider>
-      <Layout style={{ marginLeft: collapsed ? 80 : 250, transition: 'all 0.2s' }}>
+
+      <Layout style={{ marginLeft: collapsed ? 80 : 248, transition: 'all 0.2s' }}>
         <Header
           style={{
-            padding: '0 24px',
+            padding: '0 20px',
             background: '#fff',
             display: 'flex',
             alignItems: 'center',
@@ -251,67 +161,53 @@ export function AdminLayout() {
             borderBottom: '1px solid #f0f0f0',
             position: 'sticky',
             top: 0,
-            zIndex: 1,
+            zIndex: 10,
           }}
         >
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <Button
               type="text"
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed(!collapsed)}
-              style={{ fontSize: '16px' }}
+              style={{ fontSize: 16 }}
             />
             <Input
-              placeholder="Tìm kiếm lead, học viên, lớp học..."
+              placeholder="Tìm lead, học viên, lớp học..."
               prefix={<SearchOutlined />}
-              style={{ width: 350 }}
-              size="middle"
+              style={{ width: 320 }}
+              className="hidden md:flex"
             />
           </div>
-          <div className="flex items-center gap-4">
 
-            {/* Help Button */}
+          <div className="flex items-center gap-3">
             <Button
               type="text"
-              icon={<QuestionCircleOutlined style={{ fontSize: '18px' }} />}
-              size="large"
+              icon={<QuestionCircleOutlined style={{ fontSize: 18 }} />}
               onClick={() => setGuideVisible(true)}
               title="Hướng dẫn sử dụng"
             />
-
             <Dropdown menu={{ items: notificationItems }} trigger={['click']} placement="bottomRight">
-              <Badge count={unreadCount} offset={[-5, 5]}>
-                <Button
-                  type="text"
-                  icon={<BellOutlined style={{ fontSize: '18px' }} />}
-                  size="large"
-                />
+              <Badge count={0}>
+                <Button type="text" icon={<BellOutlined style={{ fontSize: 18 }} />} />
               </Badge>
             </Dropdown>
             <Dropdown menu={{ items: userMenuItems }} trigger={['click']} placement="bottomRight">
-              <div className="flex items-center gap-2 cursor-pointer">
-                <Avatar size="default">
-                  {user?.name?.[0] || 'U'}
-                </Avatar>
+              <div className="flex cursor-pointer items-center gap-2">
+                <Avatar>{user?.name?.[0] || 'U'}</Avatar>
                 <div className="hidden md:block">
-                  <div className="font-medium">{user?.name || 'User'}</div>
-                  <div className="text-xs text-gray-500">{user?.role || 'Guest'}</div>
+                  <div className="font-medium leading-5">{user?.name || 'User'}</div>
+                  <div className="text-xs text-gray-500 capitalize">{user?.role || 'guest'}</div>
                 </div>
               </div>
             </Dropdown>
           </div>
         </Header>
-        <Content
-          style={{
-            margin: '24px',
-            padding: 24,
-            minHeight: 280,
-            background: '#f0f2f5',
-          }}
-        >
+
+        <Content style={{ margin: 20, padding: 0, minHeight: 280, background: '#f5f6f8' }}>
           <Outlet />
         </Content>
       </Layout>
+
       <RoleGuide visible={guideVisible} onClose={() => setGuideVisible(false)} role={user?.role || 'admin'} />
     </Layout>
   );

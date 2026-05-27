@@ -28,124 +28,91 @@ import { RoomsPage } from '@/features/lms/RoomPage';
 import { RoomDetailPage } from '@/features/lms/RoomDetailPage';
 
 export const router = createBrowserRouter([
-  // ✅ PUBLIC ROUTE
+  { path: '/login', element: <LoginPage /> },
+  { path: '/register', element: <RegisterPage /> },
   {
-    path: '/login',
-    element: <LoginPage />,
-  },
-
-  {
-    path: '/register',
-    element: <RegisterPage />,
-  },
-
-  // 🔒 PRIVATE ROUTE
-  {
-    element: <ProtectedRoute />, // 👈 CHẶN Ở ĐÂY
+    element: <ProtectedRoute />,
     children: [
       {
         path: '/',
         element: <AdminLayout />,
         children: [
-          {
-            index: true,
-            element: <Navigate to="/dashboard" replace />,
-          },
-          {
-            path: 'dashboard',
-            element: <DashboardPage />,
-          },
-
-          // CRM
+          { index: true, element: <Navigate to="/dashboard" replace /> },
+          { path: 'dashboard', element: <DashboardPage /> },
           {
             path: 'crm',
+            element: <ProtectedRoute roles={['admin', 'sale']} />,
             children: [
-              {
-                index: true,
-                element: <Navigate to="/crm/leads" replace />,
-              },
-              {
-                element: <ProtectedRoute roles={['admin', 'sale']} />,
-                children: [
-                  { path: 'leads', element: <LeadsListPage /> },
-                ],
-              },
-              {
-                path: 'leads/:id',
-                element: <LeadDetailPage />,
-              },
+              { index: true, element: <Navigate to="/crm/leads" replace /> },
+              { path: 'leads', element: <LeadsListPage /> },
+              { path: 'leads/:id', element: <LeadDetailPage /> },
             ],
           },
-
-          // LMS
           {
             path: 'lms',
             children: [
+              { index: true, element: <Navigate to="/lms/classes" replace /> },
               {
-                index: true,
-                element: <Navigate to="/lms/students" replace />,
+                element: <ProtectedRoute roles={['admin', 'teacher']} />,
+                children: [
+                  { path: 'students', element: <StudentsPage /> },
+                  { path: 'students/:id', element: <StudentDetailPage /> },
+                ],
               },
-              { path: 'students', element: <StudentsPage /> },
-              { path: 'students/:id', element: <StudentDetailPage /> },
-              { path: 'teachers', element: <TeachersPage /> },
+              {
+                element: <ProtectedRoute roles={['admin']} />,
+                children: [
+                  { path: 'teachers', element: <TeachersPage /> },
+                  { path: 'rooms', element: <RoomsPage /> },
+                  { path: 'rooms/:id', element: <RoomDetailPage /> },
+                  { path: 'schedule', element: <SchedulePage /> },
+                  { path: 'scheduling', element: <SchedulingPage /> },
+                ],
+              },
               { path: 'courses', element: <CoursesPage /> },
               { path: 'courses/:id', element: <CourseDetailPage /> },
-              { path: 'rooms',element: <RoomsPage /> },
-              { path: 'rooms/:id',element: <RoomDetailPage /> },
               { path: 'classes', element: <ClassesPage /> },
               { path: 'classes/:id', element: <ClassDetailPage /> },
               { path: 'sessions/:id', element: <SessionDetailPage /> },
-              { path: 'schedule', element: <SchedulePage /> },
-              { path: 'scheduling', element: <SchedulingPage /> },
               { path: 'myschedule', element: <MySchedulePage /> },
             ],
           },
-
-          // Finance
           {
             path: 'finance',
+            element: <ProtectedRoute roles={['admin', 'sale']} />,
             children: [
-              {
-                index: true,
-                element: <Navigate to="/finance/invoices" replace />,
-              },
+              { index: true, element: <Navigate to="/finance/invoices" replace /> },
               { path: 'invoices', element: <InvoicesPage /> },
               { path: 'payments', element: <PaymentsPage /> },
               { path: 'debts', element: <DebtsPage /> },
             ],
           },
-
-          // AI
           {
             path: 'ai',
             children: [
+              { index: true, element: <Navigate to="/ai/predictions" replace /> },
               {
-                index: true,
-                element: <Navigate to="/ai/models" replace />,
+                element: <ProtectedRoute roles={['admin']} />,
+                children: [
+                  { path: 'models', element: <AIModelsPage /> },
+                  { path: 'insights', element: <AIInsightsPage /> },
+                ],
               },
-              { path: 'models', element: <AIModelsPage /> },
-              { path: 'predictions', element: <AIPredictionsPage /> },
-              { path: 'insights', element: <AIInsightsPage /> },
+              {
+                element: <ProtectedRoute roles={['admin', 'teacher']} />,
+                children: [{ path: 'predictions', element: <AIPredictionsPage /> }],
+              },
             ],
           },
-
-          // Settings
           {
             path: 'settings',
+            element: <ProtectedRoute roles={['admin']} />,
             children: [
-              {
-                index: true,
-                element: <Navigate to="/settings/users" replace />,
-              },
+              { index: true, element: <Navigate to="/settings/users" replace /> },
               { path: 'users', element: <UsersPage /> },
             ],
           },
-
-          // 404
-          {
-            path: '*',
-            element: <div>404</div>,
-          },
+          { path: '*', element: <div>404</div> },
         ],
       },
     ],

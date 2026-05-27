@@ -21,8 +21,8 @@ const riskColors: Record<string, string> = {
 };
 
 const riskLabels: Record<string, string> = {
-  low: 'Thap',
-  medium: 'Trung binh',
+  low: 'Thấp',
+  medium: 'Trung bình',
   high: 'Cao',
 };
 
@@ -38,7 +38,7 @@ export function AIPredictionsPage() {
       setStudents(res.data || []);
     } catch (err) {
       console.error(err);
-      message.error('Khong tai duoc dropout predictions');
+      message.error('Không tải được dữ liệu dự đoán dropout');
     } finally {
       setLoading(false);
     }
@@ -57,7 +57,7 @@ export function AIPredictionsPage() {
 
   const columns: ColumnsType<DropoutPredictionRow> = [
     {
-      title: 'Hoc vien',
+      title: 'Học viên',
       key: 'student',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -67,12 +67,12 @@ export function AIPredictionsPage() {
       ),
     },
     {
-      title: 'Loai',
+      title: 'Loại',
       key: 'targetType',
-      render: () => <Tag>Hoc vien</Tag>,
+      render: () => <Tag>Học viên</Tag>,
     },
     {
-      title: 'Diem',
+      title: 'Điểm',
       dataIndex: 'dropout_risk',
       key: 'score',
       sorter: (a, b) => Number(a.dropout_risk || 0) - Number(b.dropout_risk || 0),
@@ -83,7 +83,7 @@ export function AIPredictionsPage() {
       ),
     },
     {
-      title: 'Muc do rui ro',
+      title: 'Mức độ rủi ro',
       dataIndex: 'dropout_risk_level',
       key: 'risk',
       render: (risk: string) => (
@@ -93,7 +93,7 @@ export function AIPredictionsPage() {
       ),
     },
     {
-      title: 'Ly do chinh',
+      title: 'Lý do chính',
       key: 'reasons',
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -104,17 +104,17 @@ export function AIPredictionsPage() {
       ),
     },
     {
-      title: 'Ngay du doan',
+      title: 'Ngày dự đoán',
       dataIndex: 'dropout_risk_updated_at',
       key: 'createdAt',
       render: (date: string) => (date ? new Date(date).toLocaleDateString('vi-VN') : '-'),
     },
     {
-      title: 'Hanh dong',
+      title: 'Hành động',
       key: 'actions',
       render: (_, record) => (
         <Button type="link" size="small" href={`/lms/students/${record.id}`}>
-          Chi tiet
+          Chi tiết
         </Button>
       ),
     },
@@ -134,21 +134,21 @@ export function AIPredictionsPage() {
       <div className="bg-white p-6 rounded-lg shadow-sm">
         <div className="mb-4 flex flex-wrap gap-3">
           <Select
-            placeholder="Loai"
+            placeholder="Loại"
             style={{ width: 180 }}
             allowClear
             value="student"
-            options={[{ label: 'Hoc vien', value: 'student' }]}
+            options={[{ label: 'Học viên', value: 'student' }]}
           />
           <Select
-            placeholder="Muc do rui ro"
+            placeholder="Mức độ rủi ro"
             style={{ width: 180 }}
             allowClear
             value={riskFilter}
             onChange={setRiskFilter}
             options={[
-              { label: 'Thap', value: 'low' },
-              { label: 'Trung binh', value: 'medium' },
+              { label: 'Thấp', value: 'low' },
+              { label: 'Trung bình', value: 'medium' },
               { label: 'Cao', value: 'high' },
             ]}
           />
@@ -169,7 +169,7 @@ export function AIPredictionsPage() {
           pagination={{
             pageSize: 10,
             showSizeChanger: true,
-            showTotal: (total) => `Tong ${total} predictions`,
+            showTotal: (total) => `Tổng ${total} dự đoán`,
           }}
         />
       </div>
