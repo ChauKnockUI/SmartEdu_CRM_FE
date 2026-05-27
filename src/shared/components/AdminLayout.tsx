@@ -53,7 +53,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
         getItem('Lịch dạy', '/lms/myschedule', <CalendarOutlined />),
         getItem('Lớp học', '/lms/classes', <BookOutlined />),
       ]),
-      getItem('AI Predictions', '/ai/predictions', <RobotOutlined />),
+      getItem('Dropout Risk', '/ai/predictions', <RobotOutlined />),
     ];
   }
 
@@ -88,7 +88,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
     ]),
     getItem('AI & Insights', '/ai', <RobotOutlined />, [
       getItem('Models', '/ai/models', <RobotOutlined />),
-      getItem('Predictions', '/ai/predictions', <DashboardOutlined />),
+      getItem('Dropout Risk', '/ai/predictions', <DashboardOutlined />),
       getItem('Demo Insights', '/ai/insights', <DashboardOutlined />),
     ]),
     getItem('Cài đặt', '/settings', <SettingOutlined />, [

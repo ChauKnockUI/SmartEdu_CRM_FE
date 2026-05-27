@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Table, Tag, Button, Space, Select, Progress, message } from 'antd';
+import { Alert, Table, Tag, Button, Space, Select, Progress, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { studentService } from '@/services/api/student.service';
@@ -123,15 +123,22 @@ export function AIPredictionsPage() {
   return (
     <div>
       <PageHeader
-        title="AI Predictions"
+        title="Dropout Risk"
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'AI & Insights' },
-          { title: 'Predictions' },
+          { title: 'Dropout Risk' },
         ]}
       />
 
       <div className="bg-white p-6 rounded-lg shadow-sm">
+        <Alert
+          type="info"
+          showIcon
+          className="mb-4"
+          message="Danh sách này chỉ hiển thị học viên đã được tính dropout risk."
+          description="Để tạo dữ liệu, vào LMS > Học viên > Chi tiết học viên và bấm Tính lại risk, hoặc điểm danh một buổi học để hệ thống tự cập nhật risk."
+        />
         <div className="mb-4 flex flex-wrap gap-3">
           <Select
             placeholder="Loại"

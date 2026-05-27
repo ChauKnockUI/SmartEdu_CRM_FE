@@ -24,6 +24,7 @@ import {
   DownloadOutlined,
   FileOutlined,
   CheckCircleOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams, useNavigate } from 'react-router';
@@ -103,6 +104,7 @@ export function ClassDetailPage() {
 
   const [classItem, setClassItem] = useState<Class | null>(null);
   const [loading, setLoading] = useState(false);
+  const [riskLoading, setRiskLoading] = useState(false);
 
   const [students, setStudents] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
@@ -309,6 +311,19 @@ export function ClassDetailPage() {
     }
   };
 
+  const handleScoreClassDropoutRisk = async () => {
+    try {
+      setRiskLoading(true);
+      const res = await classService.scoreDropoutRisk(classItem.id);
+      message.success(res.message || 'Đã cập nhật dropout risk cho lớp');
+      fetchClass();
+    } catch (err: any) {
+      message.error(err.message || 'Không tính được dropout risk cho lớp');
+    } finally {
+      setRiskLoading(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
@@ -328,7 +343,16 @@ export function ClassDetailPage() {
             key: 'overview',
             label: 'Tổng quan',
             children: (
-              <Card loading={loading}>
+              <Card
+                loading={loading}
+                extra={
+                  (isAdmin || isTeacher) ? (
+                    <Button icon={<WarningOutlined />} loading={riskLoading} onClick={handleScoreClassDropoutRisk}>
+                      Tính dropout risk lớp
+                    </Button>
+                  ) : null
+                }
+              >
                 <Descriptions bordered column={2}>
                   <Descriptions.Item label="Tên lớp">{classItem.name}</Descriptions.Item>
 
