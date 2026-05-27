@@ -106,4 +106,20 @@ export const studentService = {
 
         return json;
     },
+
+    scoreDropoutRisk: async (id: number, classId: number) => {
+        const res = await fetch(
+            `${config.baseURL}/students/${id}/dropout-risk/score?class_id=${classId}`,
+            {
+                method: 'POST',
+                headers: getAuthHeader(),
+            }
+        );
+
+        const json = await res.json();
+
+        if (!res.ok) throw new Error(json.message);
+
+        return json;
+    },
 };

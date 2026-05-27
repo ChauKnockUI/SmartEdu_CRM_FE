@@ -39,6 +39,18 @@ const STATUS_LABELS: Record<string, string> = {
   dropped: 'Nghỉ học',
 };
 
+const RISK_COLORS: Record<string, string> = {
+  low: 'green',
+  medium: 'orange',
+  high: 'red',
+};
+
+const RISK_LABELS: Record<string, string> = {
+  low: 'Thấp',
+  medium: 'Trung bình',
+  high: 'Cao',
+};
+
 export function StudentsPage() {
   const navigate = useNavigate();
 
@@ -177,6 +189,25 @@ export function StudentsPage() {
         return (
           <Tag color={hasPendingDebt ? 'red' : 'green'}>
             {hasPendingDebt ? 'Đang nợ' : 'Đã đóng đủ'}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: 'Dropout risk',
+      key: 'dropout_risk',
+      sorter: (a, b) => Number(a.dropout_risk || 0) - Number(b.dropout_risk || 0),
+      render: (_, record) => {
+        const score = record.dropout_risk;
+        const level = record.dropout_risk_level;
+
+        if (score === null || score === undefined) {
+          return <Tag>Chưa tính</Tag>;
+        }
+
+        return (
+          <Tag color={RISK_COLORS[level] || 'default'}>
+            {RISK_LABELS[level] || level} - {Number(score).toFixed(1)}%
           </Tag>
         );
       },
