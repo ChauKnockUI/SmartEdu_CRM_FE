@@ -1,90 +1,121 @@
-import React from 'react';
-import { Table, Tag, Button, Space, Select, Progress } from 'antd';
-import { FilterOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useState } from 'react';
+import { Table, Tag, Button, Space, Select, Progress, message } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
-import { mockAIPredictions } from '../../services/mock/mockData';
-import type { AIPrediction } from '../../shared/types';
+import { studentService } from '@/services/api/student.service';
 
-const riskColors = {
+type DropoutPredictionRow = {
+  id: number;
+  full_name: string;
+  email?: string;
+  dropout_risk?: number | null;
+  dropout_risk_level?: 'low' | 'medium' | 'high' | null;
+  dropout_risk_updated_at?: string | null;
+  dropout_risk_reasons?: string[] | null;
+};
+
+const riskColors: Record<string, string> = {
   low: 'green',
   medium: 'orange',
   high: 'red',
 };
 
-const riskLabels = {
-  low: 'Thấp',
-  medium: 'Trung bình',
+const riskLabels: Record<string, string> = {
+  low: 'Thap',
+  medium: 'Trung binh',
   high: 'Cao',
 };
 
 export function AIPredictionsPage() {
-  const columns: ColumnsType<AIPrediction> = [
+  const [students, setStudents] = useState<DropoutPredictionRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [riskFilter, setRiskFilter] = useState<string>();
+
+  const fetchPredictions = async () => {
+    try {
+      setLoading(true);
+      const res = await studentService.getAll({ page: 1, limit: 300 });
+      setStudents(res.data || []);
+    } catch (err) {
+      console.error(err);
+      message.error('Khong tai duoc dropout predictions');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchPredictions();
+  }, []);
+
+  const data = useMemo(() => {
+    return students
+      .filter((student) => student.dropout_risk !== null && student.dropout_risk !== undefined)
+      .filter((student) => !riskFilter || student.dropout_risk_level === riskFilter)
+      .sort((a, b) => Number(b.dropout_risk || 0) - Number(a.dropout_risk || 0));
+  }, [students, riskFilter]);
+
+  const columns: ColumnsType<DropoutPredictionRow> = [
     {
-      title: 'ID',
-      dataIndex: 'targetId',
-      key: 'targetId',
-      width: 120,
-    },
-    {
-      title: 'Loại',
-      dataIndex: 'targetType',
-      key: 'targetType',
-      filters: [
-        { text: 'Lead', value: 'lead', key: 'filter-lead' },
-        { text: 'Student', value: 'student', key: 'filter-student' },
-      ],
-      onFilter: (value, record) => record.targetType === value,
-      render: (type: string) => (
-        <Tag>{type === 'lead' ? 'Lead' : 'Học viên'}</Tag>
+      title: 'Hoc vien',
+      key: 'student',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          <span className="font-medium">{record.full_name}</span>
+          <span className="text-gray-500">{record.email || '-'}</span>
+        </Space>
       ),
     },
     {
-      title: 'Điểm',
-      dataIndex: 'score',
+      title: 'Loai',
+      key: 'targetType',
+      render: () => <Tag>Hoc vien</Tag>,
+    },
+    {
+      title: 'Diem',
+      dataIndex: 'dropout_risk',
       key: 'score',
-      sorter: (a, b) => a.score - b.score,
+      sorter: (a, b) => Number(a.dropout_risk || 0) - Number(b.dropout_risk || 0),
       render: (score: number) => (
-        <div style={{ width: 100 }}>
-          <Progress percent={score} size="small" />
+        <div style={{ width: 120 }}>
+          <Progress percent={Number(score || 0)} size="small" />
         </div>
       ),
     },
     {
-      title: 'Mức độ rủi ro',
-      dataIndex: 'risk',
+      title: 'Muc do rui ro',
+      dataIndex: 'dropout_risk_level',
       key: 'risk',
-      filters: [
-        { text: 'Thấp', value: 'low', key: 'filter-low' },
-        { text: 'Trung bình', value: 'medium', key: 'filter-medium' },
-        { text: 'Cao', value: 'high', key: 'filter-high' },
-      ],
-      onFilter: (value, record) => record.risk === value,
-      render: (risk: AIPrediction['risk']) => (
-        <Tag color={riskColors[risk]}>
-          {riskLabels[risk]}
+      render: (risk: string) => (
+        <Tag color={riskColors[risk] || 'default'}>
+          {riskLabels[risk] || risk}
         </Tag>
       ),
     },
     {
-      title: 'Ngày dự đoán',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      sorter: (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
-      render: (date: Date) => date.toLocaleDateString('vi-VN'),
+      title: 'Ly do chinh',
+      key: 'reasons',
+      render: (_, record) => (
+        <Space direction="vertical" size={0}>
+          {(record.dropout_risk_reasons || []).slice(0, 2).map((reason, index) => (
+            <span key={`${record.id}-${index}`}>{reason}</span>
+          ))}
+        </Space>
+      ),
     },
     {
-      title: 'Hành động',
+      title: 'Ngay du doan',
+      dataIndex: 'dropout_risk_updated_at',
+      key: 'createdAt',
+      render: (date: string) => (date ? new Date(date).toLocaleDateString('vi-VN') : '-'),
+    },
+    {
+      title: 'Hanh dong',
       key: 'actions',
       render: (_, record) => (
-        <Space size="small">
-          <Button type="link" size="small">
-            Chi tiết
-          </Button>
-          <Button type="link" size="small">
-            Xem features
-          </Button>
-        </Space>
+        <Button type="link" size="small" href={`/lms/students/${record.id}`}>
+          Chi tiet
+        </Button>
       ),
     },
   ];
@@ -101,24 +132,23 @@ export function AIPredictionsPage() {
       />
 
       <div className="bg-white p-6 rounded-lg shadow-sm">
-        {/* Filters */}
         <div className="mb-4 flex flex-wrap gap-3">
           <Select
-            placeholder="Lọc theo loại"
+            placeholder="Loai"
             style={{ width: 180 }}
             allowClear
-            options={[
-              { label: 'Lead', value: 'lead' },
-              { label: 'Học viên', value: 'student' },
-            ]}
+            value="student"
+            options={[{ label: 'Hoc vien', value: 'student' }]}
           />
           <Select
-            placeholder="Mức độ rủi ro"
+            placeholder="Muc do rui ro"
             style={{ width: 180 }}
             allowClear
+            value={riskFilter}
+            onChange={setRiskFilter}
             options={[
-              { label: 'Thấp', value: 'low' },
-              { label: 'Trung bình', value: 'medium' },
+              { label: 'Thap', value: 'low' },
+              { label: 'Trung binh', value: 'medium' },
               { label: 'Cao', value: 'high' },
             ]}
           />
@@ -126,21 +156,20 @@ export function AIPredictionsPage() {
             placeholder="Model"
             style={{ width: 200 }}
             allowClear
-            options={[
-              { label: 'Lead Scoring Model v2', value: 'model-1' },
-              { label: 'Student Churn Predictor', value: 'model-2' },
-            ]}
+            value="dropout-v2"
+            options={[{ label: 'Dropout Risk v2', value: 'dropout-v2' }]}
           />
         </div>
 
         <Table
           columns={columns}
-          dataSource={mockAIPredictions}
+          dataSource={data}
           rowKey="id"
+          loading={loading}
           pagination={{
             pageSize: 10,
             showSizeChanger: true,
-            showTotal: (total) => `Tổng ${total} predictions`,
+            showTotal: (total) => `Tong ${total} predictions`,
           }}
         />
       </div>

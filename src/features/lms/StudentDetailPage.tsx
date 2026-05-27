@@ -25,6 +25,7 @@ import {
   CalendarOutlined,
   MailOutlined,
   PhoneOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
@@ -69,6 +70,18 @@ const formatSchedule = (days?: string, time?: string) => {
 };
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
+
+const RISK_COLORS: Record<string, string> = {
+  low: 'green',
+  medium: 'orange',
+  high: 'red',
+};
+
+const RISK_LABELS: Record<string, string> = {
+  low: 'Thấp',
+  medium: 'Trung bình',
+  high: 'Cao',
+};
 
 export function StudentDetailPage() {
   const { id } = useParams();
@@ -134,6 +147,24 @@ export function StudentDetailPage() {
       setPasswordOpen(true);
     } catch (err: any) {
       message.error(err.message || 'Reset mật khẩu thất bại');
+    }
+  };
+
+  const handleScoreDropoutRisk = async () => {
+    try {
+      const activeEnrollment = (student?.classEnrollments || []).find((item: any) => item.status === 'active') || student?.classEnrollments?.[0];
+      const classId = activeEnrollment?.class_id || activeEnrollment?.class?.id;
+
+      if (!classId) {
+        message.warning('Học viên chưa có lớp để tính dropout risk');
+        return;
+      }
+
+      await studentService.scoreDropoutRisk(Number(id), Number(classId));
+      message.success('Đã cập nhật dropout risk');
+      fetchStudent();
+    } catch (err: any) {
+      message.error(err.message || 'Không tính được dropout risk');
     }
   };
 
@@ -297,6 +328,42 @@ export function StudentDetailPage() {
                     </Card>
                   </Col>
                 </Row>
+
+                <Card className="mb-4" loading={loading}>
+                  <Row gutter={16} align="middle">
+                    <Col span={6}>
+                      <Statistic
+                        title="Dropout risk"
+                        value={student.dropout_risk ?? 0}
+                        suffix="%"
+                        precision={1}
+                        prefix={<WarningOutlined />}
+                      />
+                    </Col>
+                    <Col span={6}>
+                      <Tag color={RISK_COLORS[student.dropout_risk_level] || 'default'}>
+                        {student.dropout_risk_level ? RISK_LABELS[student.dropout_risk_level] || student.dropout_risk_level : 'Chưa tính'}
+                      </Tag>
+                    </Col>
+                    <Col span={8}>
+                      <Space direction="vertical" size={4}>
+                        {(student.dropout_risk_reasons || []).slice(0, 3).map((reason: string, index: number) => (
+                          <Typography.Text key={`${reason}-${index}`}>{reason}</Typography.Text>
+                        ))}
+                        {student.dropout_risk_updated_at && (
+                          <Typography.Text type="secondary">
+                            Cập nhật: {new Date(student.dropout_risk_updated_at).toLocaleString('vi-VN')}
+                          </Typography.Text>
+                        )}
+                      </Space>
+                    </Col>
+                    <Col span={4}>
+                      <Button onClick={handleScoreDropoutRisk}>
+                        Tính lại risk
+                      </Button>
+                    </Col>
+                  </Row>
+                </Card>
 
                 <Card loading={loading}>
                   <Descriptions bordered column={2}>
