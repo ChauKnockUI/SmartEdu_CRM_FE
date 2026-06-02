@@ -249,6 +249,19 @@ export function DashboardPage() {
               </DashboardCard>
             </Col>
           </Row>
+
+          <DashboardCard title="Học viên cần thu học phí" extra={<Badge count={(lists.paymentIssues || []).length} />}>
+            <List
+              locale={{ emptyText: 'Chưa có công nợ cần xử lý' }}
+              dataSource={lists.paymentIssues || []}
+              rowKey="id"
+              renderItem={(item: any) => (
+                <List.Item actions={[<Button key="call" type="link" icon={<PhoneOutlined />}>Gọi ngay</Button>]}>
+                  <List.Item.Meta title={<Space wrap>{item.name}<Tag color={item.overdue > 0 ? 'red' : 'orange'}>{item.overdue > 0 ? `Quá hạn ${item.overdue} ngày` : 'Chưa thanh toán'}</Tag></Space>} description={`Công nợ: ${formatCurrency(item.amount || 0)}`} />
+                </List.Item>
+              )}
+            />
+          </DashboardCard>
         </>
       )}
 
@@ -261,6 +274,63 @@ export function DashboardPage() {
             <KpiCard title="Học viên phụ trách" value={kpis.students || 0} prefix={<TeamOutlined />} color="#52c41a" />
             <KpiCard title="Buổi dạy tuần này" value={kpis.sessionsThisWeek || 0} prefix={<CalendarOutlined />} color="#faad14" />
             <KpiCard title="Tỉ lệ đi học TB" value={kpis.attendanceRate || 0} prefix={<CheckCircleOutlined />} suffix="%" color="#52c41a" />
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Lịch dạy hôm nay">
+                <List
+                  locale={{ emptyText: 'Hôm nay chưa có lịch dạy' }}
+                  dataSource={lists.todayClasses || []}
+                  rowKey="id"
+                  renderItem={(item: any) => (
+                    <List.Item actions={[<Button key="attendance" type="primary" icon={<CheckCircleOutlined />} onClick={() => navigate(`/lms/classes/${item.classId}`)}>Điểm danh</Button>]}>
+                      <List.Item.Meta avatar={<CalendarOutlined className="text-xl text-blue-500" />} title={item.name} description={`${formatTime(item.startTime)}-${formatTime(item.endTime)} - ${item.room || 'Chưa có phòng'}`} />
+                    </List.Item>
+                  )}
+                />
+              </DashboardCard>
+            </Col>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Học viên cần chú ý" extra={<Badge count={(lists.attentionStudents || []).length} />}>
+                <List
+                  locale={{ emptyText: 'Chưa có học viên cần chú ý' }}
+                  dataSource={lists.attentionStudents || []}
+                  rowKey="id"
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta avatar={<WarningOutlined className="text-lg text-orange-500" />} title={item.name} description={item.issue} />
+                    </List.Item>
+                  )}
+                />
+              </DashboardCard>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Buổi dạy sắp tới">
+                {lists.upcomingSessions?.length ? (
+                  <Timeline items={lists.upcomingSessions.map((item: any) => ({ children: <div><strong>{formatDate(item.date)}</strong> - {item.name} ({formatTime(item.startTime)}-{formatTime(item.endTime)})</div> }))} />
+                ) : (
+                  <EmptyState text="Tuần này chưa có buổi dạy" />
+                )}
+              </DashboardCard>
+            </Col>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Tài liệu và ghi chú">
+                <List
+                  locale={{ emptyText: 'Chưa có tài liệu' }}
+                  dataSource={lists.materials || []}
+                  rowKey="id"
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta avatar={<FileTextOutlined className="text-lg text-blue-500" />} title={item.title} description={formatDate(item.date)} />
+                    </List.Item>
+                  )}
+                />
+              </DashboardCard>
+            </Col>
           </Row>
         </>
       )}
@@ -282,6 +352,61 @@ export function DashboardPage() {
             <KpiCard title="Buổi đã học" value={kpis.attendedSessions || 0} prefix={<BookOutlined />} color="#1677ff" />
             <KpiCard title="Buổi vắng" value={kpis.absentSessions || 0} prefix={<CloseCircleOutlined />} color="#f5222d" />
             <KpiCard title="Bài tập chưa nộp" value={kpis.missingAssignments || 0} prefix={<FileTextOutlined />} color="#faad14" />
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Lịch học tuần này">
+                {lists.weekSchedule?.length ? (
+                  <Timeline items={lists.weekSchedule.map((item: any) => ({ children: <div><strong>{formatDate(item.date)} - {formatTime(item.startTime)}-{formatTime(item.endTime)}</strong><div className="text-gray-600">{item.name} - {item.room || 'Chưa có phòng'}</div></div> }))} />
+                ) : (
+                  <EmptyState text="Tuần này chưa có lịch học" />
+                )}
+              </DashboardCard>
+            </Col>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Tiến độ học tập">
+                <Space direction="vertical" className="w-full" size="middle">
+                  <div>
+                    <div className="mb-2 flex justify-between"><span>Hoàn thành khóa học</span><strong>{lists.progress?.courseCompletion || 0}%</strong></div>
+                    <Progress percent={lists.progress?.courseCompletion || 0} />
+                    <p className="mt-1 text-sm text-gray-600">{lists.progress?.attended || 0}/{lists.progress?.totalTarget || 50} buổi học</p>
+                  </div>
+                </Space>
+              </DashboardCard>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Học phí">
+                <List
+                  locale={{ emptyText: 'Chưa có hóa đơn' }}
+                  dataSource={lists.invoices || []}
+                  rowKey="id"
+                  renderItem={(item: any) => (
+                    <List.Item>
+                      <List.Item.Meta title={item.className || item.title} description={`Hạn: ${formatDate(item.dueDate)} - ${formatCurrency(item.amount || 0)}`} />
+                      <Tag color={item.status === 'paid' ? 'success' : 'orange'}>{item.status === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán'}</Tag>
+                    </List.Item>
+                  )}
+                />
+              </DashboardCard>
+            </Col>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Bài tập và tài liệu">
+                <List
+                  locale={{ emptyText: 'Chưa có tài liệu' }}
+                  dataSource={lists.materials || []}
+                  rowKey="id"
+                  renderItem={(item: any) => (
+                    <List.Item actions={[<Button key="download" type="link" size="small">Tải xuống</Button>]}>
+                      <List.Item.Meta avatar={<FileTextOutlined className="text-lg text-blue-500" />} title={item.title} description={formatDate(item.date)} />
+                    </List.Item>
+                  )}
+                />
+              </DashboardCard>
+            </Col>
           </Row>
         </>
       )}
