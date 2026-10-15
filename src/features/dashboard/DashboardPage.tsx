@@ -19,6 +19,7 @@ import { useNavigate } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { dashboardService, type DashboardOverview } from '../../services/api/dashboard.service';
+import { leadService } from '../../services/api/lead.service';
 
 const COLORS = ['#1677ff', '#13c2c2', '#faad14', '#ff7a45', '#722ed1'];
 const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
@@ -90,6 +91,7 @@ export function DashboardPage() {
   const role = user?.role || 'admin';
   const navigate = useNavigate();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
+  const [funnelData, setFunnelData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,6 +113,17 @@ export function DashboardPage() {
       .finally(() => {
         if (mounted) setLoading(false);
       });
+
+    // Tải thông số phễu chuyển đổi cho Admin & Sale
+    if (role === 'admin' || role === 'sale') {
+      leadService.getFunnel()
+        .then((res) => {
+          if (mounted && res?.data) {
+            setFunnelData(res.data);
+          }
+        })
+        .catch(() => {});
+    }
 
     return () => {
       mounted = false;
@@ -169,6 +182,53 @@ export function DashboardPage() {
               </DashboardCard>
             </Col>
             <Col xs={24} lg={12}>
+              <DashboardCard
+                title="Phễu chuyển đổi khách hàng"
+                extra={
+                  <Button type="link" onClick={() => navigate('/crm/leads')}>
+                    Xem chi tiết
+                  </Button>
+                }
+              >
+                {funnelData?.progressionFunnel?.length ? (
+                  <div className="space-y-2.5">
+                    {funnelData.progressionFunnel.map((step: any) => (
+                      <div key={step.step}>
+                        <div className="flex justify-between text-xs text-gray-700">
+                          <span className="font-medium">{step.step}</span>
+                          <span className="font-semibold text-gray-900">
+                            {step.count} lead ({step.percentOfTotal}%)
+                          </span>
+                        </div>
+                        <Progress
+                          percent={step.percentOfTotal}
+                          strokeColor={step.color}
+                          showInfo={false}
+                          size={['100%', 8]}
+                        />
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
+                      <span className="text-gray-500">
+                        Pipeline: <strong className="text-blue-600">{formatCompactMoney(funnelData.summary?.activePipelineValue || 0)}đ</strong>
+                      </span>
+                      <span className="text-gray-500">
+                        Kỳ vọng AI: <strong className="text-purple-600">{formatCompactMoney(funnelData.summary?.weightedPipelineValue || 0)}đ</strong>
+                      </span>
+                      <span className="text-gray-500">
+                        Win rate: <strong className="text-emerald-600">{funnelData.summary?.winRate || 0}%</strong>
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyState text="Chưa có dữ liệu phễu" />
+                )}
+              </DashboardCard>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
               <DashboardCard title="Nguồn lead">
                 {data.charts?.leadSources?.length ? (
                   <ResponsiveContainer width="100%" height={260}>
@@ -184,9 +244,6 @@ export function DashboardPage() {
                 )}
               </DashboardCard>
             </Col>
-          </Row>
-
-          <Row gutter={[16, 16]}>
             <Col xs={24} lg={12}>
               <DashboardCard title="Cảnh báo hệ thống" extra={<Badge count={data.alerts?.length || 0} />}>
                 <List
@@ -201,7 +258,10 @@ export function DashboardPage() {
                 />
               </DashboardCard>
             </Col>
-            <Col xs={24} lg={12}>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24}>
               <DashboardCard title="Hoạt động gần đây">
                 {data.activities?.length ? (
                   <Timeline items={data.activities.map((item) => ({ children: <div><strong>{item.actor}</strong> {item.text} - {formatTime(item.time)}</div> }))} />
@@ -240,6 +300,53 @@ export function DashboardPage() {
               </DashboardCard>
             </Col>
             <Col xs={24} lg={12}>
+              <DashboardCard
+                title="Phễu chuyển đổi bán hàng"
+                extra={
+                  <Button type="link" onClick={() => navigate('/crm/leads')}>
+                    Quản lý phễu
+                  </Button>
+                }
+              >
+                {funnelData?.progressionFunnel?.length ? (
+                  <div className="space-y-2.5">
+                    {funnelData.progressionFunnel.map((step: any) => (
+                      <div key={step.step}>
+                        <div className="flex justify-between text-xs text-gray-700">
+                          <span className="font-medium">{step.step}</span>
+                          <span className="font-semibold text-gray-900">
+                            {step.count} lead ({step.percentOfTotal}%)
+                          </span>
+                        </div>
+                        <Progress
+                          percent={step.percentOfTotal}
+                          strokeColor={step.color}
+                          showInfo={false}
+                          size={['100%', 8]}
+                        />
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
+                      <span className="text-gray-500">
+                        Pipeline: <strong className="text-blue-600">{formatCompactMoney(funnelData.summary?.activePipelineValue || 0)}đ</strong>
+                      </span>
+                      <span className="text-gray-500">
+                        Kỳ vọng AI: <strong className="text-purple-600">{formatCompactMoney(funnelData.summary?.weightedPipelineValue || 0)}đ</strong>
+                      </span>
+                      <span className="text-gray-500">
+                        Win rate: <strong className="text-emerald-600">{funnelData.summary?.winRate || 0}%</strong>
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyState text="Chưa có dữ liệu phễu" />
+                )}
+              </DashboardCard>
+            </Col>
+          </Row>
+
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={12}>
               <DashboardCard title="Lịch follow-up hôm nay">
                 {lists.followUps?.length ? (
                   <Timeline items={lists.followUps.map((item: any) => ({ children: <div><strong>{item.time}</strong> - {item.title}</div> }))} />
@@ -248,20 +355,21 @@ export function DashboardPage() {
                 )}
               </DashboardCard>
             </Col>
+            <Col xs={24} lg={12}>
+              <DashboardCard title="Học viên cần thu học phí" extra={<Badge count={(lists.paymentIssues || []).length} />}>
+                <List
+                  locale={{ emptyText: 'Chưa có công nợ cần xử lý' }}
+                  dataSource={lists.paymentIssues || []}
+                  rowKey="id"
+                  renderItem={(item: any) => (
+                    <List.Item actions={[<Button key="call" type="link" icon={<PhoneOutlined />}>Gọi ngay</Button>]}>
+                      <List.Item.Meta title={<Space wrap>{item.name}<Tag color={item.overdue > 0 ? 'red' : 'orange'}>{item.overdue > 0 ? `Quá hạn ${item.overdue} ngày` : 'Chưa thanh toán'}</Tag></Space>} description={`Công nợ: ${formatCurrency(item.amount || 0)}`} />
+                    </List.Item>
+                  )}
+                />
+              </DashboardCard>
+            </Col>
           </Row>
-
-          <DashboardCard title="Học viên cần thu học phí" extra={<Badge count={(lists.paymentIssues || []).length} />}>
-            <List
-              locale={{ emptyText: 'Chưa có công nợ cần xử lý' }}
-              dataSource={lists.paymentIssues || []}
-              rowKey="id"
-              renderItem={(item: any) => (
-                <List.Item actions={[<Button key="call" type="link" icon={<PhoneOutlined />}>Gọi ngay</Button>]}>
-                  <List.Item.Meta title={<Space wrap>{item.name}<Tag color={item.overdue > 0 ? 'red' : 'orange'}>{item.overdue > 0 ? `Quá hạn ${item.overdue} ngày` : 'Chưa thanh toán'}</Tag></Space>} description={`Công nợ: ${formatCurrency(item.amount || 0)}`} />
-                </List.Item>
-              )}
-            />
-          </DashboardCard>
         </>
       )}
 

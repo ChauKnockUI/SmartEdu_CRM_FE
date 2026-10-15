@@ -20,10 +20,12 @@ import {
   CloseCircleOutlined,
   ExclamationCircleOutlined,
   SaveOutlined,
+  BellOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams, useNavigate } from 'react-router';
 import { attendanceService } from '../../services/api/attendance.service';
+import { scheduleService } from '../../services/api/schedule.service';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import dayjs from 'dayjs';
@@ -37,6 +39,7 @@ interface AttendanceRecord {
   email?: string;
   status: AttendanceStatus;
   notes: string;
+  is_attendance_unlocked?: boolean;
 }
 
 interface SessionData {
@@ -48,6 +51,7 @@ interface SessionData {
   teacherName: string;
   lessonContent?: string | null;
   notes?: string | null;
+  is_attendance_unlocked?: boolean;
   enrolledStudents: {
     id: number;
     name: string;
@@ -82,10 +86,62 @@ export function SessionDetailPage() {
   const [lessonContent, setLessonContent] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reminding, setReminding] = useState(false);
+  const [togglingUnlock, setTogglingUnlock] = useState(false);
+  const [requestingUnlock, setRequestingUnlock] = useState(false);
+
 
   const canEditAttendance = permissions.canTakeAttendance && role === 'teacher';
   const canViewFullAttendance = role === 'teacher';
   const canViewAbsenceList = role === 'admin' || role === 'student';
+
+  const handleRemindTeacher = async () => {
+    try {
+      setReminding(true);
+      const res = await scheduleService.remindAttendance(Number(scheduleId));
+      message.success(res.message || 'Đã gửi thông báo nhắc giảng viên điểm danh thành công!');
+    } catch (err: any) {
+      message.error(err.message || 'Lỗi gửi nhắc điểm danh');
+    } finally {
+      setReminding(false);
+    }
+  };
+
+  const isLockedByTime = useMemo(() => {
+    if (!sessionData) return false;
+    let start = new Date(sessionData.date);
+    if (sessionData.startTime) {
+      const st = new Date(sessionData.startTime);
+      start.setHours(st.getHours(), st.getMinutes(), 0, 0);
+    }
+    const diffHours = (Date.now() - start.getTime()) / (1000 * 60 * 60);
+    return diffHours > 48;
+  }, [sessionData]);
+
+  const handleToggleUnlock = async (unlock: boolean) => {
+    try {
+      setTogglingUnlock(true);
+      const res = await attendanceService.toggleUnlock(Number(scheduleId), unlock);
+      message.success(res.message);
+      setSessionData((prev) => (prev ? { ...prev, is_attendance_unlocked: unlock } : null));
+    } catch (err: any) {
+      message.error(err.message || 'Thao tác thất bại');
+    } finally {
+      setTogglingUnlock(false);
+    }
+  };
+
+  const handleRequestUnlock = async () => {
+    try {
+      setRequestingUnlock(true);
+      const res = await attendanceService.requestUnlock(Number(scheduleId));
+      message.success(res.message);
+    } catch (err: any) {
+      message.error(err.message || 'Lỗi gửi yêu cầu');
+    } finally {
+      setRequestingUnlock(false);
+    }
+  };
 
   useEffect(() => {
     if (scheduleId) {
@@ -309,8 +365,61 @@ export function SessionDetailPage() {
   ];
 
   const buildActions = () => {
-    if (!canEditAttendance) {
-      return null;
+    // Dành cho Admin
+    if (role === 'admin') {
+      const isAttended = sessionData?.enrolledStudents?.some((s) => s.attendance !== null);
+      return (
+        <Space>
+          {/* Nút Mở / Khóa quyền điểm danh */}
+          {sessionData?.is_attendance_unlocked ? (
+            <Button
+              danger
+              loading={togglingUnlock}
+              onClick={() => handleToggleUnlock(false)}
+            >
+              Khóa lại điểm danh
+            </Button>
+          ) : (
+            <Button
+              type="primary"
+              style={{ backgroundColor: '#52c41a' }}
+              loading={togglingUnlock}
+              onClick={() => handleToggleUnlock(true)}
+            >
+              Mở quyền điểm danh cho GV
+            </Button>
+          )}
+
+          {!isAttended && (
+            <Button
+              danger
+              icon={<BellOutlined />}
+              loading={reminding}
+              onClick={handleRemindTeacher}
+            >
+              Nhắc GV điểm danh
+            </Button>
+          )}
+        </Space>
+      );
+    }
+
+    // Dành cho Giáo viên
+    if (!canEditAttendance) return null;
+
+    // Nếu quá 48h và chưa được Admin mở khóa
+    if (isLockedByTime && !sessionData?.is_attendance_unlocked) {
+      return (
+        <Button
+          type="primary"
+          danger
+          icon={<BellOutlined />}
+          loading={requestingUnlock}
+          onClick={handleRequestUnlock}
+        >
+          Gửi yêu cầu Admin mở quyền điểm danh
+        </Button>
+      );
     }
 
     if (!editMode) {
@@ -370,6 +479,39 @@ export function SessionDetailPage() {
         ]}
         actions={buildActions()}
       />
+
+      {/* Cảnh báo dành riêng cho Giáo viên khi bị khóa */}
+      {role === 'teacher' && isLockedByTime && !sessionData?.is_attendance_unlocked && (
+        <Alert
+          message="Buổi học đã bị khóa điểm danh"
+          description="Buổi học này đã kết thúc quá 48 giờ. Vui lòng bấm nút 'Gửi yêu cầu Admin mở quyền điểm danh' ở góc trên để được mở lại quyền."
+          type="warning"
+          showIcon
+          className="mb-4"
+        />
+      )}
+
+      {/* Thông báo cho Admin biết ca này đang khóa và GV không thể điểm danh nếu Admin chưa bấm mở */}
+      {role === 'admin' && isLockedByTime && !sessionData?.is_attendance_unlocked && (
+        <Alert
+          message="Ca học đang khóa quyền điểm danh của Giáo viên (quá 48h)"
+          description="Giáo viên hiện không thể điểm danh ca này. Bạn có thể bấm nút 'Mở quyền điểm danh cho GV' ở góc trên nếu cần cho phép giáo viên cập nhật."
+          type="info"
+          showIcon
+          className="mb-4"
+        />
+      )}
+
+      {/* Thông báo khi đã được mở khóa */}
+      {sessionData?.is_attendance_unlocked && (
+        <Alert
+          message="Quyền điểm danh đang được mở bởi Admin"
+          description="Buổi học đã được Quản trị viên mở khóa. Giáo viên có thể tiến hành điểm danh và lưu dữ liệu bình thường."
+          type="success"
+          showIcon
+          className="mb-4"
+        />
+      )}
 
       <div className="space-y-6">
         <Card title="Thông tin buổi học">

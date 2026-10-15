@@ -9,8 +9,26 @@ const getAuthHeader = () => ({
 });
 
 export const scheduleService = {
-  getAll: async () => {
-    const res = await fetch(`${config.baseURL}/schedules`, {
+  getAll: async (params?: {
+    start_date?: string;
+    end_date?: string;
+    class_id?: number;
+    teacher_id?: number;
+    room_id?: number;
+    status?: string;
+  }) => {
+    const query = new URLSearchParams();
+    if (params?.start_date) query.append('start_date', params.start_date);
+    if (params?.end_date) query.append('end_date', params.end_date);
+    if (params?.class_id) query.append('class_id', String(params.class_id));
+    if (params?.teacher_id) query.append('teacher_id', String(params.teacher_id));
+    if (params?.room_id) query.append('room_id', String(params.room_id));
+    if (params?.status) query.append('status', params.status);
+
+    const queryString = query.toString();
+    const url = queryString ? `${config.baseURL}/schedules?${queryString}` : `${config.baseURL}/schedules`;
+
+    const res = await fetch(url, {
       headers: getAuthHeader(),
     });
 
@@ -79,4 +97,28 @@ export const scheduleService = {
 
     return json;
   },
-};
+
+  remindAttendance: async (scheduleId: number) => {
+    const res = await fetch(`${config.baseURL}/schedules/${scheduleId}/remind-attendance`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Lỗi gửi nhắc điểm danh');
+
+    return json;
+  },
+
+  remindAllOverdue: async () => {
+    const res = await fetch(`${config.baseURL}/schedules/remind-overdue`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Lỗi nhắc nhở quá hạn');
+
+    return json;
+  },
+};

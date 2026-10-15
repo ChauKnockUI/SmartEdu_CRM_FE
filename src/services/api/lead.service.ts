@@ -40,6 +40,11 @@ export const leadService = {
     return request(`/leads${query ? `?${query}` : ''}`);
   },
 
+  getFunnel: async (params?: Record<string, unknown>) => {
+    const query = buildQuery(params);
+    return request(`/leads/funnel${query ? `?${query}` : ''}`);
+  },
+
   getById: async (id: string) => request(`/leads/${id}`),
 
   getActivities: async (id: string) => request(`/leads/${id}/activities`),

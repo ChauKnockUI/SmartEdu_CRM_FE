@@ -67,4 +67,27 @@ export const attendanceService = {
     if (!res.ok) throw new Error(json.message);
     return json;
   },
+
+  // Admin Mở / Khóa quyền điểm danh
+  toggleUnlock: async (scheduleId: number, unlock: boolean) => {
+    const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}/unlock`, {
+      method: 'PATCH',
+      headers: getAuthHeader(),
+      body: JSON.stringify({ unlock }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message);
+    return json;
+  },
+
+  // Giáo viên yêu cầu mở khóa
+  requestUnlock: async (scheduleId: number) => {
+    const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}/request-unlock`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message);
+    return json;
+  },
 };

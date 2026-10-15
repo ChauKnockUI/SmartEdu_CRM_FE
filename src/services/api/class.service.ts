@@ -112,6 +112,21 @@ export const classService = {
     return json;
   },
 
+  unenrollStudent: async (classId: number, studentId: number) => {
+    const res = await fetch(`${config.baseURL}/classes/${classId}/enroll/${studentId}`, {
+      method: 'DELETE',
+      headers: getAuthHeader(),
+    });
+
+    const json = await res.json();
+
+    if (!res.ok) {
+      throw new Error(json.message || 'Hủy ghi danh thất bại');
+    }
+
+    return json;
+  },
+
   scoreDropoutRisk: async (classId: number) => {
     const res = await fetch(`${config.baseURL}/classes/${classId}/dropout-risk/score`, {
       method: 'POST',
