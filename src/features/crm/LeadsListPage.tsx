@@ -496,7 +496,7 @@ export function LeadsListPage() {
               key: 'pipeline',
               label: (
                 <span>
-                  <AppstoreOutlined /> Phễu bán hàng (Kanban)
+                  <AppstoreOutlined /> Phễu bán hàng
                 </span>
               ),
               children: (

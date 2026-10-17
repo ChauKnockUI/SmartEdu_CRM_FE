@@ -94,12 +94,26 @@ export const classService = {
     return json;
   },
 
-  enrollStudents: async (classId: number, studentIds: number[]) => {
+  checkConflicts: async (classId: number, studentIds: number[]) => {
+    const res = await fetch(`${config.baseURL}/classes/${classId}/check-conflicts`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify({
+        student_ids: studentIds,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Không thể kiểm tra xung đột lịch học');
+    return json;
+  },
+
+  enrollStudents: async (classId: number, studentIds: number[], allowConflicts: boolean = false) => {
     const res = await fetch(`${config.baseURL}/classes/${classId}/enroll`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify({
         student_ids: studentIds,
+        allow_conflicts: allowConflicts,
       }),
     });
 

@@ -70,6 +70,10 @@ export function SchedulingPage() {
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
   const [enrollLoading, setEnrollLoading] = useState(false);
   const [unenrollLoadingId, setUnenrollLoadingId] = useState<number | null>(null);
+  const [conflictsMap, setConflictsMap] = useState<Record<number, { has_conflict: boolean; reason?: string }>>({});
+  const [conflictLoading, setConflictLoading] = useState(false);
+  const [onlyFreeStudents, setOnlyFreeStudents] = useState(false);
+  const [allowConflicts, setAllowConflicts] = useState(false);
 
   // ================= FETCH CLASSES =================
   const fetchClasses = async () => {
@@ -273,9 +277,15 @@ export function SchedulingPage() {
       return;
     }
 
+    const hasConflictedSelected = selectedStudentIds.some((id) => conflictsMap[id]?.has_conflict);
+    if (hasConflictedSelected && !allowConflicts) {
+      message.warning('Có học viên bị trùng lịch. Vui lòng bỏ chọn hoặc tích xác nhận ghi danh đặc cách.');
+      return;
+    }
+
     try {
       setEnrollLoading(true);
-      const res = await classService.enrollStudents(selectedClass.id, selectedStudentIds);
+      const res = await classService.enrollStudents(selectedClass.id, selectedStudentIds, allowConflicts);
       const successful = res.data?.successful || [];
       const failed = res.data?.failed || [];
 
@@ -319,6 +329,7 @@ export function SchedulingPage() {
 
       setEnrollModalOpen(false);
       setSelectedStudentIds([]);
+      setAllowConflicts(false);
       fetchClassDetails(selectedClass.id);
       fetchClasses();
     } catch (err: any) {
@@ -358,6 +369,29 @@ export function SchedulingPage() {
   const currentCount = enrolledList.length;
   const capacityPercent = maxStudents > 0 ? Math.min(100, Math.round((currentCount / maxStudents) * 100)) : 0;
   const remainingSlots = maxStudents > 0 ? Math.max(0, maxStudents - currentCount) : 'Không giới hạn';
+
+  useEffect(() => {
+    if (enrollModalOpen && selectedClass && candidateStudents.length > 0) {
+      setConflictLoading(true);
+      setAllowConflicts(false);
+      classService
+        .checkConflicts(
+          selectedClass.id,
+          candidateStudents.map((s) => s.id)
+        )
+        .then((res) => {
+          if (res?.data) {
+            setConflictsMap(res.data);
+          }
+        })
+        .catch((err) => {
+          console.error('Lỗi check conflict:', err);
+        })
+        .finally(() => {
+          setConflictLoading(false);
+        });
+    }
+  }, [enrollModalOpen, selectedClass, candidateStudents.length]);
 
   return (
     <div>
@@ -689,8 +723,8 @@ export function SchedulingPage() {
                     capacityPercent >= 100
                       ? '#ef4444'
                       : capacityPercent >= 80
-                      ? '#f59e0b'
-                      : '#8b5cf6'
+                        ? '#f59e0b'
+                        : '#8b5cf6'
                   }
                 />
               </div>
@@ -766,9 +800,8 @@ export function SchedulingPage() {
                   render: (record: any) => (
                     <Popconfirm
                       title="Xác nhận hủy ghi danh"
-                      description={`Bạn có chắc muốn xóa học viên ${
-                        record.student?.full_name || ''
-                      } khỏi lớp này?`}
+                      description={`Bạn có chắc muốn xóa học viên ${record.student?.full_name || ''
+                        } khỏi lớp này?`}
                       onConfirm={() => handleUnenrollStudent(record.student_id || record.student?.id)}
                       okText="Xóa"
                       cancelText="Hủy"
@@ -811,15 +844,24 @@ export function SchedulingPage() {
         cancelText="Đóng"
       >
         <div className="space-y-4 py-2">
-          <Alert
-            type="info"
-            showIcon
-            message={
-              <div>
-                Hệ thống sẽ <b>tự động kiểm tra trùng lịch học</b> với các lớp khác mà học viên đang tham gia, đồng thời kiểm tra rào cản sĩ số tối đa.
-              </div>
-            }
-          />
+          <div className="flex justify-between items-center bg-gray-50 p-2.5 rounded border border-gray-200">
+            <span className="text-xs text-gray-600">
+              {conflictLoading ? (
+                <span className="text-blue-600 font-medium">Đang kiểm tra lịch trống của học viên...</span>
+              ) : (
+                <span>Trạng thái:<b>Trống lịch</b> | <b>Trùng lịch</b></span>
+              )}
+            </span>
+            <label className="flex items-center gap-2 text-xs font-medium text-gray-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={onlyFreeStudents}
+                onChange={(e) => setOnlyFreeStudents(e.target.checked)}
+                className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>Chỉ hiện học viên không trùng lịch</span>
+            </label>
+          </div>
 
           <div>
             <div className="text-sm font-medium text-gray-700 mb-1">
@@ -835,13 +877,52 @@ export function SchedulingPage() {
               filterOption={(input, option) =>
                 (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
               }
-              options={candidateStudents.map((s) => ({
-                value: s.id,
-                label: `${s.full_name} (${s.email || s.phone || 'ID: ' + s.id})`,
-              }))}
+              options={candidateStudents
+                .filter((s) => !onlyFreeStudents || !conflictsMap[s.id]?.has_conflict)
+                .map((s) => {
+                  const conflict = conflictsMap[s.id];
+                  const isConflict = conflict?.has_conflict;
+                  const tag = isConflict ? `[${conflict.reason}]` : `[Trống lịch]`;
+                  return {
+                    value: s.id,
+                    label: `${s.full_name} (${s.email || s.phone || 'ID: ' + s.id}) - ${tag}`,
+                  };
+                })}
               maxTagCount="responsive"
             />
           </div>
+
+          {selectedStudentIds.some((id) => conflictsMap[id]?.has_conflict) && (
+            <div className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 space-y-2">
+              <div className="font-semibold flex items-center gap-1.5 text-amber-900">
+                <WarningOutlined className="text-amber-600 text-sm" />
+                <span>Phát hiện học viên đã chọn có lịch học trùng với lớp này:</span>
+              </div>
+              <ul className="list-disc pl-5 space-y-1">
+                {selectedStudentIds
+                  .filter((id) => conflictsMap[id]?.has_conflict)
+                  .map((id) => {
+                    const st = allStudents.find((s) => s.id === id);
+                    return (
+                      <li key={id}>
+                        <b>{st?.full_name}</b>: {conflictsMap[id]?.reason}
+                      </li>
+                    );
+                  })}
+              </ul>
+              <div className="pt-1 border-t border-amber-200">
+                <label className="flex items-center gap-2 font-medium text-amber-950 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={allowConflicts}
+                    onChange={(e) => setAllowConflicts(e.target.checked)}
+                    className="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                  />
+                  <span>Xác nhận ghi danh đặc cách dù có trùng lịch học (sẽ sắp xếp lịch học bù sau)</span>
+                </label>
+              </div>
+            </div>
+          )}
 
           {selectedStudentIds.length > 0 && (
             <div className="text-xs text-purple-700 bg-purple-50 p-2.5 rounded border border-purple-100 flex justify-between items-center">
