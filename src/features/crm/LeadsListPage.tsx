@@ -463,11 +463,12 @@ export function LeadsListPage() {
   return (
     <div>
       <PageHeader
-        title="Quản lý lead & Phễu bán hàng"
+        title={user?.role === 'sale' ? 'Khách hàng của tôi' : 'Quản lý lead & Phễu bán hàng'}
+        subtitle={user?.role === 'sale' ? 'Danh sách khách hàng bạn trực tiếp phụ trách và chăm sóc' : 'Quản lý toàn bộ khách hàng tiềm năng của trung tâm'}
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'CRM' },
-          { title: 'Leads & Funnel' },
+          { title: user?.role === 'sale' ? 'My Leads' : 'Leads & Funnel' },
         ]}
         actions={
           <Space wrap>
@@ -483,7 +484,7 @@ export function LeadsListPage() {
           type="info"
           showIcon
           className="mb-4"
-          message="Danh sách sale được sắp xếp mặc định theo AI score cao nhất."
+          message="Danh sách khách hàng bạn trực tiếp phụ trách, được sắp xếp ưu tiên theo điểm AI Score cao nhất."
         />
       )}
 
