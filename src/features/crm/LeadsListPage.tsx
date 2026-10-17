@@ -1,6 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Button, DatePicker, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Tooltip, Upload, message } from 'antd';
-import { DeleteOutlined, DownloadOutlined, InboxOutlined, PlusOutlined, ReloadOutlined, UserAddOutlined } from '@ant-design/icons';
+import {
+  Alert,
+  Button,
+  DatePicker,
+  Drawer,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tabs,
+  Tag,
+  Tooltip,
+  Upload,
+  message,
+} from 'antd';
+import {
+  AppstoreOutlined,
+  DeleteOutlined,
+  DownloadOutlined,
+  InboxOutlined,
+  LineChartOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  TableOutlined,
+  UserAddOutlined,
+} from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
 import dayjs from 'dayjs';
@@ -10,6 +36,9 @@ import { useAuth } from '@/shared/contexts/AuthContext';
 import { leadService } from '@/services/api/lead.service';
 import { courseService } from '@/services/api/course.service';
 import { userService } from '@/services/api/user.service';
+import { LeadPipelineBoard } from './components/LeadPipelineBoard';
+import { LeadFunnelAnalytics } from './components/LeadFunnelAnalytics';
+import { MarkLostModal } from './components/MarkLostModal';
 
 const { RangePicker } = DatePicker;
 
@@ -123,6 +152,8 @@ export function LeadsListPage() {
   const [importing, setImporting] = useState(false);
   const [filters, setFilters] = useState<any>({});
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
+  const [viewMode, setViewMode] = useState<'pipeline' | 'table' | 'funnel'>('pipeline');
+  const [lostTargetLead, setLostTargetLead] = useState<any | null>(null);
 
   const fetchLeads = async (page = pagination.current, pageSize = pagination.pageSize, nextFilters = filters) => {
     try {
@@ -171,8 +202,18 @@ export function LeadsListPage() {
     }
   };
 
+  const handleViewModeChange = (mode: 'pipeline' | 'table' | 'funnel') => {
+    setViewMode(mode);
+    if (mode === 'pipeline') {
+      fetchLeads(1, 200);
+    } else if (mode === 'table') {
+      fetchLeads(1, 10);
+    }
+  };
+
   useEffect(() => {
-    fetchLeads(1);
+    // Pipeline view load full leads để hiển thị đầy đủ các cột phễu
+    fetchLeads(1, 200);
     fetchCourses();
     fetchSales();
   }, [user?.role]);
@@ -400,6 +441,11 @@ export function LeadsListPage() {
               Convert
             </Button>
           </Tooltip>
+          {record.status !== 'lost' && record.status !== 'enrolled' && (
+            <Button danger type="link" onClick={() => setLostTargetLead(record)}>
+              Lost
+            </Button>
+          )}
           {user?.role === 'admin' && (
             <Button danger type="text" icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)} />
           )}
@@ -417,11 +463,12 @@ export function LeadsListPage() {
   return (
     <div>
       <PageHeader
-        title="Quản lý lead"
+        title={user?.role === 'sale' ? 'Khách hàng của tôi' : 'Quản lý lead & Phễu bán hàng'}
+        subtitle={user?.role === 'sale' ? 'Danh sách khách hàng bạn trực tiếp phụ trách và chăm sóc' : 'Quản lý toàn bộ khách hàng tiềm năng của trung tâm'}
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'CRM' },
-          { title: 'Leads' },
+          { title: user?.role === 'sale' ? 'My Leads' : 'Leads & Funnel' },
         ]}
         actions={
           <Space wrap>
@@ -437,52 +484,106 @@ export function LeadsListPage() {
           type="info"
           showIcon
           className="mb-4"
-          message="Danh sách sale được sắp xếp mặc định theo AI score cao nhất."
+          message="Danh sách khách hàng bạn trực tiếp phụ trách, được sắp xếp ưu tiên theo điểm AI Score cao nhất."
         />
       )}
 
       <div className="rounded-lg bg-white p-4 shadow-sm">
-        <Space className="mb-4 w-full" size={12} wrap>
-          <Select
-            placeholder="Trạng thái"
-            style={{ width: 180 }}
-            allowClear
-            value={filters.status}
-            onChange={(status) => handleFilterChange({ status })}
-            options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))}
-          />
-          <Select
-            placeholder="Nguồn"
-            style={{ width: 180 }}
-            allowClear
-            value={filters.source}
-            onChange={(source) => handleFilterChange({ source })}
-            options={sourceOptions}
-          />
-          <RangePicker value={filters.dateRange} onChange={(dateRange) => handleFilterChange({ dateRange })} />
-          <Input.Search
-            allowClear
-            placeholder="Tìm theo tên, SĐT, email"
-            style={{ width: 260 }}
-            onSearch={(search) => handleFilterChange({ search })}
-          />
-        </Space>
+        <Tabs
+          activeKey={viewMode}
+          onChange={(val) => handleViewModeChange(val as any)}
+          items={[
+            {
+              key: 'pipeline',
+              label: (
+                <span>
+                  <AppstoreOutlined /> Phễu bán hàng
+                </span>
+              ),
+              children: (
+                <LeadPipelineBoard
+                  leads={leads}
+                  loading={loading}
+                  courses={courses}
+                  sales={sales}
+                  currentUserId={user?.id ? Number(user.id) : undefined}
+                  userRole={user?.role}
+                  onRefresh={() => fetchLeads(1, 200)}
+                  onConvert={handleConvert}
+                  onOpenCreate={() => setDrawerVisible(true)}
+                />
+              ),
+            },
+            {
+              key: 'table',
+              label: (
+                <span>
+                  <TableOutlined /> Danh sách chi tiết
+                </span>
+              ),
+              children: (
+                <div>
+                  <Space className="mb-4 w-full" size={12} wrap>
+                    <Select
+                      placeholder="Trạng thái"
+                      style={{ width: 180 }}
+                      allowClear
+                      value={filters.status}
+                      onChange={(status) => handleFilterChange({ status })}
+                      options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))}
+                    />
+                    <Select
+                      placeholder="Nguồn"
+                      style={{ width: 180 }}
+                      allowClear
+                      value={filters.source}
+                      onChange={(source) => handleFilterChange({ source })}
+                      options={sourceOptions}
+                    />
+                    <RangePicker value={filters.dateRange} onChange={(dateRange) => handleFilterChange({ dateRange })} />
+                    <Input.Search
+                      allowClear
+                      placeholder="Tìm theo tên, SĐT, email"
+                      style={{ width: 260 }}
+                      onSearch={(search) => handleFilterChange({ search })}
+                    />
+                  </Space>
 
-        <Table
-          columns={columns}
-          dataSource={tableData}
-          rowKey="id"
-          loading={loading}
-          scroll={{ x: 1100 }}
-          pagination={{
-            current: pagination.current,
-            pageSize: pagination.pageSize,
-            total: pagination.total,
-            showSizeChanger: true,
-            pageSizeOptions: [5, 7, 10, 20, 50],
-            showTotal: (total) => `Tổng ${total} lead`,
-            onChange: (page, pageSize) => fetchLeads(page, pageSize),
-          }}
+                  <Table
+                    columns={columns}
+                    dataSource={tableData}
+                    rowKey="id"
+                    loading={loading}
+                    scroll={{ x: 1100 }}
+                    pagination={{
+                      current: pagination.current,
+                      pageSize: pagination.pageSize,
+                      total: pagination.total,
+                      showSizeChanger: true,
+                      pageSizeOptions: [5, 7, 10, 20, 50],
+                      showTotal: (total) => `Tổng ${total} lead`,
+                      onChange: (page, pageSize) => fetchLeads(page, pageSize),
+                    }}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'funnel',
+              label: (
+                <span>
+                  <LineChartOutlined /> Báo cáo chuyển đổi
+                </span>
+              ),
+              children: (
+                <LeadFunnelAnalytics
+                  courses={courses}
+                  sales={sales}
+                  userRole={user?.role}
+                />
+              ),
+            },
+          ]}
         />
       </div>
 
@@ -566,6 +667,16 @@ export function LeadsListPage() {
           <p className="ant-upload-hint">Mỗi dòng hợp lệ sẽ tạo một lead và tự trigger AI scoring.</p>
         </Upload.Dragger>
       </Drawer>
+
+      <MarkLostModal
+        open={!!lostTargetLead}
+        lead={lostTargetLead}
+        onCancel={() => setLostTargetLead(null)}
+        onSuccess={() => {
+          setLostTargetLead(null);
+          fetchLeads();
+        }}
+      />
     </div>
   );
 }

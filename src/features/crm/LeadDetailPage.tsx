@@ -132,9 +132,9 @@ export function LeadDetailPage() {
       setLoading(true);
       const res = await leadService.getById(id);
       setLead(res.data);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      message.error('Không tải được thông tin lead');
+      message.error(err.message || 'Không tải được thông tin lead');
     } finally {
       setLoading(false);
     }
@@ -307,7 +307,7 @@ export function LeadDetailPage() {
   }
 
   if (loading && !lead) return <Spin />;
-  if (!lead) return <Empty description="Không tìm thấy lead" />;
+  if (!lead) return <Empty description="Không tìm thấy lead hoặc bạn không có quyền truy cập" />;
 
   const tabs = [
     {

@@ -36,6 +36,10 @@ type ViewType = 'list' | 'calendar';
 interface MyClass {
   id: number;
   name: string;
+  start_date?: string | Date;
+  end_date?: string | Date;
+  schedule_days?: any;
+  schedule_time?: any;
   schedule?: string;
   room?: string;
   students?: number;
@@ -65,16 +69,17 @@ const getArrayData = (res: any) => {
 };
 
 const formatTime = (value?: string | Date | null) => {
-  if (!value) return 'N/A';
+  if (!value) return '';
 
-  const text = String(value);
+  const text = String(value).trim();
 
-  // ISO datetime
+  // ISO datetime match: 2026-10-14T09:00:00 or similar
   const isoMatch = text.match(/T(\d{2}:\d{2})/);
   if (isoMatch) {
     return isoMatch[1];
   }
 
+  // Already HH:mm format
   if (/^\d{2}:\d{2}/.test(text)) {
     return text.slice(0, 5);
   }
@@ -82,30 +87,155 @@ const formatTime = (value?: string | Date | null) => {
   return text;
 };
 
-const formatSchedule = (classItem: any) => {
-  if (classItem.schedule) return classItem.schedule;
+const DAY_LABELS: Record<string, string> = {
+  '0': 'Chủ nhật',
+  '1': 'Thứ 2',
+  '2': 'Thứ 3',
+  '3': 'Thứ 4',
+  '4': 'Thứ 5',
+  '5': 'Thứ 6',
+  '6': 'Thứ 7',
+  'Sun': 'Chủ nhật',
+  'Mon': 'Thứ 2',
+  'Tue': 'Thứ 3',
+  'Wed': 'Thứ 4',
+  'Thu': 'Thứ 5',
+  'Fri': 'Thứ 6',
+  'Sat': 'Thứ 7',
+  'CN': 'Chủ nhật',
+};
 
-  const days = classItem.schedule_days;
-  const time = classItem.schedule_time;
+const getDayWeight = (d: any) => {
+  const num = Number(d);
+  if (!isNaN(num)) {
+    return num === 0 ? 7 : num;
+  }
+  const weightMap: Record<string, number> = {
+    Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7,
+    'Thứ 2': 1, 'Thứ 3': 2, 'Thứ 4': 3, 'Thứ 5': 4, 'Thứ 6': 5, 'Thứ 7': 6,
+    CN: 7, 'Chủ nhật': 7,
+  };
+  return weightMap[String(d).trim()] || 99;
+};
 
-  let daysText = '';
+const parseScheduleDaysText = (val: any): string => {
+  if (!val) return '';
+  let arr: any[] = [];
 
-  if (Array.isArray(days)) {
-    daysText = days.join(', ');
-  } else if (typeof days === 'string') {
-    daysText = days;
+  if (Array.isArray(val)) {
+    arr = val;
+  } else if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        arr = JSON.parse(trimmed);
+      } catch {
+        arr = trimmed.slice(1, -1).split(',');
+      }
+    } else {
+      arr = trimmed.split(',');
+    }
   }
 
-  let timeText = '';
+  if (!Array.isArray(arr) || arr.length === 0) return '';
 
-  if (Array.isArray(time)) {
-    timeText = time.join(' - ');
-  } else if (typeof time === 'string') {
-    timeText = time;
+  const labels = arr
+    .map((item) => String(item).trim().replace(/['"]/g, ''))
+    .filter(Boolean)
+    .sort((a, b) => getDayWeight(a) - getDayWeight(b))
+    .map((item) => DAY_LABELS[item] || (item.startsWith('Thứ') || item === 'Chủ nhật' ? item : `Thứ ${item}`));
+
+  return Array.from(new Set(labels)).join(', ');
+};
+
+const parseScheduleTimeText = (val: any): string => {
+  if (!val) return '';
+  let times: string[] = [];
+
+  if (Array.isArray(val)) {
+    times = val.map((t) => formatTime(t)).filter(Boolean);
+  } else if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          times = parsed.map((t) => formatTime(t)).filter(Boolean);
+        }
+      } catch {
+        // Fallback to regex
+      }
+    }
+
+    if (times.length === 0) {
+      const matches = trimmed.match(/\d{1,2}:\d{2}/g);
+      if (matches) {
+        times = matches.slice(0, 2);
+      }
+    }
   }
 
-  if (!daysText && !timeText) return '-';
-  return `${daysText}${daysText && timeText ? ': ' : ''}${timeText}`;
+  if (times.length >= 2) {
+    return `${times[0]} - ${times[1]}`;
+  }
+  if (times.length === 1) {
+    return times[0];
+  }
+  return typeof val === 'string' && !val.includes('[') ? val : '';
+};
+
+export const formatClassSchedule = (classItem: any) => {
+  let daysRaw = classItem.schedule_days;
+  let timeRaw = classItem.schedule_time;
+
+  // Handle case where schedule is saved as "[1,4]: [\"09:00\", \"10:30\"]" or similar combined string
+  if ((!daysRaw || !timeRaw) && typeof classItem.schedule === 'string') {
+    const parts = classItem.schedule.split(':');
+    if (parts.length >= 2 && parts[0].includes('[') && parts[1].includes('[')) {
+      if (!daysRaw) daysRaw = parts[0].trim();
+      if (!timeRaw) timeRaw = parts.slice(1).join(':').trim();
+    } else if (!daysRaw) {
+      daysRaw = classItem.schedule;
+    }
+  }
+
+  const daysText = parseScheduleDaysText(daysRaw);
+  const timeText = parseScheduleTimeText(timeRaw);
+
+  return { daysText, timeText };
+};
+
+const CLASS_STATUS_CONFIG: Record<
+  string,
+  { label: string; color: string }
+> = {
+  upcoming: { label: 'Sắp khai giảng', color: 'processing' },
+  ongoing: { label: 'Đang diễn ra', color: 'success' },
+  active: { label: 'Đang diễn ra', color: 'success' },
+  completed: { label: 'Đã kết thúc', color: 'default' },
+  cancelled: { label: 'Đã hủy', color: 'error' },
+  paused: { label: 'Tạm dừng', color: 'warning' },
+};
+
+const computeClassStatus = (cls: MyClass): string => {
+  // Nếu đã bị hủy thủ công thì ưu tiên giữ nguyên
+  if (cls.status === 'cancelled') return 'cancelled';
+
+  const today = dayjs().startOf('day');
+  const startDate = cls.start_date ? dayjs(cls.start_date).startOf('day') : null;
+  const endDate = cls.end_date ? dayjs(cls.end_date).endOf('day') : null;
+
+  if (startDate && startDate.isValid()) {
+    if (today.isBefore(startDate)) {
+      return 'upcoming'; // Chưa tới ngày khai giảng
+    }
+    if (endDate && endDate.isValid() && today.isAfter(endDate)) {
+      return 'completed'; // Đã qua ngày kết thúc
+    }
+    return 'ongoing'; // Đã tới/qua ngày khai giảng -> Đang diễn ra
+  }
+
+  return cls.status || 'ongoing';
 };
 
 export function MySchedulePage() {
@@ -144,7 +274,11 @@ export function MySchedulePage() {
       const classList = getArrayData(classRes).map((item: any) => ({
         id: item.id,
         name: item.name,
-        schedule: formatSchedule(item),
+        start_date: item.start_date,
+        end_date: item.end_date,
+        schedule_days: item.schedule_days,
+        schedule_time: item.schedule_time,
+        schedule: item.schedule,
         room: item.room?.name || item.room_name || item.room || '-',
         students:
           item.students_count ||
@@ -263,14 +397,18 @@ export function MySchedulePage() {
 
   const renderSessionStatus = (status: string) => {
     if (status === 'attended') {
-      return <Tag color="green">Đã điểm danh</Tag>;
+      return <Tag color="success">Đã điểm danh</Tag>;
     }
 
     if (status === 'completed') {
-      return <Tag color="green">Đã hoàn thành</Tag>;
+      return <Tag color="cyan">Đã hoàn thành</Tag>;
     }
 
-    return <Tag color="blue">Chưa điểm danh</Tag>;
+    if (status === 'cancelled') {
+      return <Tag color="error">Đã hủy</Tag>;
+    }
+
+    return <Tag color="processing">Chưa điểm danh</Tag>;
   };
 
   const classColumns: ColumnsType<MyClass> = [
@@ -279,16 +417,41 @@ export function MySchedulePage() {
       dataIndex: 'name',
       key: 'name',
       render: (name: string, record) => (
-        <Button type="link" onClick={() => openClassDetail(record.id)}>
+        <Button
+          type="link"
+          className="p-0 font-medium text-blue-600 hover:text-blue-800"
+          onClick={() => openClassDetail(record.id)}
+        >
           {name}
         </Button>
       ),
     },
     {
       title: 'Lịch học',
-      dataIndex: 'schedule',
       key: 'schedule',
-      render: (schedule?: string) => schedule || '-',
+      render: (_, record) => {
+        const { daysText, timeText } = formatClassSchedule(record);
+        if (!daysText && !timeText) {
+          return <span className="text-gray-400 italic">Chưa có lịch</span>;
+        }
+
+        return (
+          <div className="flex flex-col gap-1 py-1">
+            {daysText ? (
+              <div className="flex items-center gap-1.5 font-medium text-gray-800">
+                <CalendarOutlined className="text-blue-500 text-xs" />
+                <span>{daysText}</span>
+              </div>
+            ) : null}
+            {timeText ? (
+              <div className="flex items-center gap-1.5 text-xs text-gray-500">
+                <ClockCircleOutlined className="text-gray-400 text-xs" />
+                <span>{timeText}</span>
+              </div>
+            ) : null}
+          </div>
+        );
+      },
     },
     {
       title: 'Phòng',
@@ -296,8 +459,8 @@ export function MySchedulePage() {
       key: 'room',
       render: (room?: string) => (
         <Space>
-          <EnvironmentOutlined />
-          {room || '-'}
+          <EnvironmentOutlined className="text-gray-400" />
+          <span>{room || '-'}</span>
         </Space>
       ),
     },
@@ -313,13 +476,15 @@ export function MySchedulePage() {
       : []),
     {
       title: 'Trạng thái',
-      dataIndex: 'status',
       key: 'status',
-      render: (status?: string) => (
-        <Tag color={status === 'active' || status === 'ongoing' ? 'green' : 'blue'}>
-          {status || 'active'}
-        </Tag>
-      ),
+      render: (_, record) => {
+        const actualStatus = computeClassStatus(record);
+        const config = CLASS_STATUS_CONFIG[actualStatus] || {
+          label: 'Đang diễn ra',
+          color: 'success',
+        };
+        return <Tag color={config.color}>{config.label}</Tag>;
+      },
     },
     {
       title: 'Thao tác',
@@ -347,22 +512,34 @@ export function MySchedulePage() {
       title: 'Ngày',
       dataIndex: 'date',
       key: 'date',
-      render: (date: string | Date) => (
-        <Space>
-          <CalendarOutlined />
-          {dayjs(date).format('dddd, DD/MM/YYYY')}
-        </Space>
-      ),
+      render: (date: string | Date) => {
+        const d = dayjs(date);
+        const isToday = d.isSame(dayjs(), 'day');
+        return (
+          <Space>
+            <CalendarOutlined className={isToday ? 'text-green-500' : 'text-blue-500'} />
+            <span className={`capitalize ${isToday ? 'font-semibold text-green-700' : 'text-gray-800'}`}>
+              {d.format('dddd, DD/MM/YYYY')}
+            </span>
+            {isToday && <Tag color="green">Hôm nay</Tag>}
+          </Space>
+        );
+      },
     },
     {
       title: 'Thời gian',
       key: 'time',
-      render: (_, record) => (
-        <Space>
-          <ClockCircleOutlined />
-          {formatTime(record.startTime)} - {formatTime(record.endTime)}
-        </Space>
-      ),
+      render: (_, record) => {
+        const sTime = formatTime(record.startTime);
+        const eTime = formatTime(record.endTime);
+        const timeStr = sTime && eTime ? `${sTime} - ${eTime}` : sTime || eTime || 'Chưa có giờ';
+        return (
+          <Space>
+            <ClockCircleOutlined className="text-gray-400" />
+            <span className="font-medium text-gray-700">{timeStr}</span>
+          </Space>
+        );
+      },
     },
     {
       title: 'Phòng',
@@ -438,27 +615,38 @@ export function MySchedulePage() {
       />
 
       <Alert
-        message={`Hôm nay - ${dayjs().format('dddd, DD/MM/YYYY')}`}
+        message={<span className="capitalize font-semibold">{`Hôm nay - ${dayjs().format('dddd, DD/MM/YYYY')}`}</span>}
         description={
           todaySessions.length > 0 ? (
             <div>
-              <strong>Có {todaySessions.length} buổi học hôm nay</strong>
-              <div className="mt-2">
+              <div className="font-medium text-blue-900 mb-2">Có {todaySessions.length} buổi học hôm nay:</div>
+              <div className="mt-2 space-y-1.5">
                 {todaySessions.map((session) => (
-                  <div key={session.id}>
-                    {formatTime(session.startTime)} - {session.className}
+                  <div key={session.id} className="flex items-center gap-2 text-sm">
+                    <Tag color="blue" className="font-mono">
+                      {formatTime(session.startTime)} - {formatTime(session.endTime)}
+                    </Tag>
+                    <span className="font-medium text-gray-800">{session.className}</span>
+                    <span className="text-gray-500">({session.room || 'Chưa xếp phòng'})</span>
+                    {renderSessionStatus(session.status)}
                   </div>
                 ))}
               </div>
             </div>
           ) : (
             <div>
-              <strong>Không có buổi học hôm nay</strong>
+              <span className="text-gray-600">Không có buổi học hôm nay.</span>
               {nextSession && (
-                <div className="mt-2">
-                  Buổi học tiếp theo: {dayjs(nextSession.date).format('dddd, DD/MM/YYYY')} -{' '}
-                  {nextSession.className} ({formatTime(nextSession.startTime)} -{' '}
-                  {formatTime(nextSession.endTime)})
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-gray-700 font-medium">Buổi tiếp theo:</span>
+                  <Tag color="cyan" className="capitalize">
+                    {dayjs(nextSession.date).format('dddd, DD/MM/YYYY')}
+                  </Tag>
+                  <Tag color="blue" className="font-mono">
+                    {formatTime(nextSession.startTime)} - {formatTime(nextSession.endTime)}
+                  </Tag>
+                  <span className="font-semibold text-blue-700">{nextSession.className}</span>
+                  <span className="text-gray-500">({nextSession.room || 'Chưa xếp phòng'})</span>
                 </div>
               )}
             </div>
@@ -466,7 +654,7 @@ export function MySchedulePage() {
         }
         type="info"
         showIcon
-        className="mb-6"
+        className="mb-6 shadow-sm border-blue-200"
       />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">

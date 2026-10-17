@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, type MenuProps } from 'antd';
+import { useState, useEffect } from 'react';
+import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, Space, Typography, type MenuProps } from 'antd';
 import {
   BellOutlined,
   BookOutlined,
@@ -19,10 +19,21 @@ import {
   SwapOutlined,
   TeamOutlined,
   UserOutlined,
+  ExclamationCircleFilled,
+  ClockCircleFilled,
+  InfoCircleFilled,
+  CheckOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useAuth, type UserRole } from '../contexts/AuthContext';
 import { RoleGuide } from './RoleGuide';
+import { notificationService, type NotificationItem } from '../../services/api/notification.service';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
+import 'dayjs/locale/vi';
+
+dayjs.extend(relativeTime);
+dayjs.locale('vi');
 
 const { Header, Sider, Content } = Layout;
 type MenuItem = Required<MenuProps>['items'][number];
@@ -116,17 +127,72 @@ export function AdminLayout() {
     { key: 'logout', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true, onClick: handleLogout },
   ];
 
-  const notificationItems: MenuProps['items'] = [
-    {
-      key: 'empty',
-      disabled: true,
-      label: (
-        <div style={{ width: 280 }}>
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có thông báo mới" />
-        </div>
-      ),
-    },
-  ];
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+  const [loadingNotifs, setLoadingNotifs] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+
+  const fetchNotifications = async () => {
+    try {
+      setLoadingNotifs(true);
+      const res = await notificationService.getMyNotifications();
+      if (res.success) {
+        setNotifications(res.data || []);
+        setUnreadCount(res.unread_count || 0);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoadingNotifs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user) {
+      fetchNotifications();
+      const interval = setInterval(fetchNotifications, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
+  const handleMarkAsRead = async (id: number, link?: string | null) => {
+    try {
+      await notificationService.markAsRead(id);
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
+      setNotifOpen(false);
+      if (link) {
+        navigate(link);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      await notificationService.markAllAsRead();
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+      setUnreadCount(0);
+    } catch {
+      // ignore
+    }
+  };
+
+  const getNotifIcon = (type: string) => {
+    switch (type) {
+      case 'overdue_attendance':
+        return <ExclamationCircleFilled className="text-red-500 text-lg" />;
+      case 'attendance_reminder':
+        return <ClockCircleFilled className="text-amber-500 text-lg" />;
+      case 'system_alert':
+        return <ExclamationCircleFilled className="text-orange-500 text-lg" />;
+      default:
+        return <InfoCircleFilled className="text-blue-500 text-lg" />;
+    }
+  };
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -186,8 +252,77 @@ export function AdminLayout() {
               onClick={() => setGuideVisible(true)}
               title="Hướng dẫn sử dụng"
             />
-            <Dropdown menu={{ items: notificationItems }} trigger={['click']} placement="bottomRight">
-              <Badge count={0}>
+            <Dropdown
+              open={notifOpen}
+              onOpenChange={(open) => {
+                setNotifOpen(open);
+                if (open) fetchNotifications();
+              }}
+              trigger={['click']}
+              placement="bottomRight"
+              dropdownRender={() => (
+                <div className="w-80 sm:w-96 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
+                  <div className="px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 flex items-center justify-between text-white">
+                    <div className="flex items-center gap-2">
+                      <BellOutlined className="text-lg" />
+                      <span className="font-semibold text-sm">Thông báo hệ thống</span>
+                      {unreadCount > 0 && (
+                        <span className="px-2 py-0.5 text-xs bg-red-500 rounded-full font-bold">
+                          {unreadCount} mới
+                        </span>
+                      )}
+                    </div>
+                    {unreadCount > 0 && (
+                      <Button
+                        type="link"
+                        size="small"
+                        className="text-white hover:text-blue-100 p-0 text-xs font-medium"
+                        onClick={handleMarkAllAsRead}
+                      >
+                        Đã đọc tất cả
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+                    {notifications.length === 0 ? (
+                      <div className="p-8 text-center">
+                        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có thông báo nào" />
+                      </div>
+                    ) : (
+                      notifications.map((notif) => (
+                        <div
+                          key={notif.id}
+                          onClick={() => handleMarkAsRead(notif.id, notif.link)}
+                          className={`p-3.5 hover:bg-gray-50 cursor-pointer transition-colors flex items-start gap-3 ${
+                            !notif.is_read ? 'bg-blue-50/50' : ''
+                          }`}
+                        >
+                          <div className="mt-0.5 shrink-0">{getNotifIcon(notif.type)}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1 mb-1">
+                              <span className={`text-xs ${!notif.is_read ? 'font-bold text-gray-900' : 'font-medium text-gray-750'} truncate`}>
+                                {notif.title}
+                              </span>
+                              {!notif.is_read && (
+                                <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-600 line-clamp-2 mb-1.5 leading-relaxed">
+                              {notif.message}
+                            </p>
+                            <span className="text-[11px] text-gray-400">
+                              {dayjs(notif.createdAt).fromNow()}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            >
+              <Badge count={unreadCount} overflowCount={99}>
                 <Button type="text" icon={<BellOutlined style={{ fontSize: 18 }} />} />
               </Badge>
             </Dropdown>

@@ -16,6 +16,7 @@ import {
   Alert,
   TimePicker,
   Upload,
+  Popconfirm,
 } from 'antd';
 import {
   EditOutlined,
@@ -25,6 +26,7 @@ import {
   FileOutlined,
   CheckCircleOutlined,
   WarningOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams, useNavigate } from 'react-router';
@@ -277,6 +279,16 @@ export function ClassDetailPage() {
     }
   };
 
+  const handleUnenroll = async (studentId: number) => {
+    try {
+      await classService.unenrollStudent(classItem.id, studentId);
+      message.success('Đã hủy ghi danh học viên khỏi lớp');
+      fetchClass();
+    } catch (err: any) {
+      message.error(err.message || 'Lỗi khi xóa học viên');
+    }
+  };
+
   const handleUploadMaterial = async () => {
     try {
       const values = await uploadForm.validateFields();
@@ -462,6 +474,23 @@ export function ClassDetailPage() {
                         );
                       },
                     },
+                    ...(isAdmin ? [{
+                      title: 'Thao tác',
+                      render: (row: any) => (
+                        <Popconfirm
+                          title="Xác nhận hủy ghi danh"
+                          description={`Bạn có chắc muốn xóa học viên ${row.student?.full_name || ''} khỏi lớp này?`}
+                          onConfirm={() => handleUnenroll(row.student_id || row.student?.id)}
+                          okText="Xóa"
+                          cancelText="Hủy"
+                          okButtonProps={{ danger: true }}
+                        >
+                          <Button danger size="small" icon={<DeleteOutlined />}>
+                            Xóa khỏi lớp
+                          </Button>
+                        </Popconfirm>
+                      ),
+                    }] : []),
                   ]}
                 />
               </Card>
@@ -498,6 +527,11 @@ export function ClassDetailPage() {
                     {
                       title: 'Phòng',
                       render: (row: any) => row.room?.name || row.room_name || '—',
+                    },
+                    {
+                      title: 'Giảng viên',
+                      render: (row: any) =>
+                        row.teacher?.full_name || classItem.teacher?.full_name || '—',
                     },
                     {
                       title: 'Trạng thái',

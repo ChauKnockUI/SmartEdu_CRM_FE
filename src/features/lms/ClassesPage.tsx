@@ -133,7 +133,7 @@ export function ClassesPage() {
     if (typeof val === 'string') {
       try {
         return JSON.parse(val);
-      } catch {}
+      } catch { }
     }
 
     return [];
