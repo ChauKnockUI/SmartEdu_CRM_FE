@@ -42,7 +42,8 @@ export class ApiClient {
   }
 
   private buildUrl(endpoint: string, params?: Record<string, any>): string {
-    const url = new URL(`${this.baseURL}${endpoint}`);
+    // baseURL có thể là đường dẫn tương đối (/api): API cùng origin/subdomain với FE
+    const url = new URL(`${this.baseURL}${endpoint}`, window.location.origin);
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
@@ -146,8 +147,7 @@ export class ApiClient {
 
 export const getApiConfig = (): ApiClientConfig => {
   const env = (import.meta as any).env.MODE || 'development';
-  const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || 'http://localhost:3000/api';
-  const apiKey = (import.meta as any).env.VITE_API_KEY;
+  const apiBaseUrl = (import.meta as any).env.VITE_API_BASE_URL || '/api';
 
   console.log(`🚀 Running in ${env} mode with API: ${apiBaseUrl}`);
 
@@ -157,7 +157,6 @@ export const getApiConfig = (): ApiClientConfig => {
     headers: {
       'Content-Type': 'application/json',
     },
-    apiKey,
   };
 };
 
