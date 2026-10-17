@@ -20,6 +20,17 @@ export default defineConfig({
     },
   },
 
+  // Dev: API cùng origin với FE (BE xác định trung tâm từ Host, ví dụ demo.localhost:5173).
+  // Không bật changeOrigin để giữ nguyên Host gốc khi chuyển tiếp tới BE.
+  server: {
+    proxy: {
+      '/api': {
+        target: process.env.VITE_DEV_PROXY_TARGET || 'http://localhost:3000',
+        changeOrigin: false,
+      },
+    },
+  },
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })
