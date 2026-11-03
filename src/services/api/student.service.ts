@@ -122,4 +122,10 @@ export const studentService = {
 
         return json;
     },
+    getClassDropoutRisks: async (id: number) => {
+        const res = await fetch(`${config.baseURL}/students/${id}/dropout-risk`, { headers: getAuthHeader() });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.message || 'Không tải được đánh giá theo lớp');
+        return json;
+    },
 };

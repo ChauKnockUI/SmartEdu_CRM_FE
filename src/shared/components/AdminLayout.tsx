@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, Space, Typography, type MenuProps } from 'antd';
+import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, type MenuProps } from 'antd';
 import {
   BellOutlined,
   BookOutlined,
@@ -22,12 +22,12 @@ import {
   ExclamationCircleFilled,
   ClockCircleFilled,
   InfoCircleFilled,
-  CheckOutlined,
 } from '@ant-design/icons';
 import { Outlet, useLocation, useNavigate } from 'react-router';
 import { useAuth, type UserRole } from '../contexts/AuthContext';
 import { RoleGuide } from './RoleGuide';
 import { notificationService, type NotificationItem } from '../../services/api/notification.service';
+import { activeMenuKey, type NavigationContext } from '../utils/navigation';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/vi';
@@ -40,6 +40,11 @@ type MenuItem = Required<MenuProps>['items'][number];
 
 function getItem(label: string, key: string, icon?: React.ReactNode, children?: MenuItem[]): MenuItem {
   return { key, icon, children, label } as MenuItem;
+}
+
+function leafMenuKeys(items: MenuItem[]): string[] {
+  return items.flatMap(item => !item ? [] : 'children' in item && item.children
+    ? leafMenuKeys(item.children as MenuItem[]) : item.key ? [String(item.key)] : []);
 }
 
 function getMenuItemsForRole(role: UserRole): MenuItem[] {
@@ -114,6 +119,14 @@ export function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const menuItems = getMenuItemsForRole(user?.role || 'admin');
+  const selectedMenuKey = activeMenuKey(location.pathname, leafMenuKeys(menuItems), (location.state as NavigationContext | null)?.menuKey);
+  const [openMenuKeys, setOpenMenuKeys] = useState<string[]>([]);
+  useEffect(() => {
+    const parent = menuItems.find(item => item && 'children' in item
+      && item.children?.some(child => child && String(child.key) === selectedMenuKey));
+    if (parent?.key) setOpenMenuKeys(current => Array.from(new Set([...current, String(parent.key)])));
+  }, [selectedMenuKey]);
 
   const handleLogout = () => {
     logout();
@@ -129,7 +142,7 @@ export function AdminLayout() {
 
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [loadingNotifs, setLoadingNotifs] = useState(false);
+  const [, setLoadingNotifs] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
 
   const fetchNotifications = async () => {
@@ -209,9 +222,10 @@ export function AdminLayout() {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[location.pathname]}
-          defaultOpenKeys={['/crm', '/lms', '/finance', '/ai', '/settings']}
-          items={getMenuItemsForRole(user?.role || 'admin')}
+          selectedKeys={selectedMenuKey ? [selectedMenuKey] : []}
+          openKeys={openMenuKeys}
+          onOpenChange={setOpenMenuKeys}
+          items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
       </Sider>

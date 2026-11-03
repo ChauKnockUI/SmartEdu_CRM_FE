@@ -1,185 +1,130 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Table, Tag, Button, Space, Select, Progress, message } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Table, Button, Space, Select, Input, message } from 'antd';
+import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { useSearchParams } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
+import { RiskEstimate, SupportPriority, RiskDetailsDrawer, riskTime } from '../../shared/components/DropoutRisk';
+import { supportLevels, supportOrder, type DropoutRiskView } from '../../shared/utils/dropoutRisk';
+import { classService } from '@/services/api/class.service';
 import { studentService } from '@/services/api/student.service';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { useAuth } from '../../shared/contexts/AuthContext';
 
-type DropoutPredictionRow = {
-  id: number;
-  full_name: string;
-  email?: string;
-  dropout_risk?: number | null;
-  dropout_risk_level?: 'low' | 'medium' | 'high' | null;
-  dropout_risk_updated_at?: string | null;
-  dropout_risk_reasons?: string[] | null;
-};
-
-const riskColors: Record<string, string> = {
-  low: 'green',
-  medium: 'orange',
-  high: 'red',
-};
-
-const riskLabels: Record<string, string> = {
-  low: 'Thấp',
-  medium: 'Trung bình',
-  high: 'Cao',
-};
+type ClassOption = { id: number; name: string; status: string };
+type StudentRow = { id: number; full_name: string; email?: string; risk?: DropoutRiskView };
 
 export function AIPredictionsPage() {
-  const [students, setStudents] = useState<DropoutPredictionRow[]>([]);
+  const { openDetail, navigationState } = useDetailNavigation();
+  const { user } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const [classes, setClasses] = useState<ClassOption[]>([]);
+  const [students, setStudents] = useState<StudentRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [scoring, setScoring] = useState(false);
   const [riskFilter, setRiskFilter] = useState<string>();
-
-  const fetchPredictions = async () => {
-    try {
-      setLoading(true);
-      const res = await studentService.getAll({ page: 1, limit: 300 });
-      setStudents(res.data || []);
-    } catch (err) {
-      console.error(err);
-      message.error('Không tải được dữ liệu dự đoán dropout');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const request = useRef(0);
+  const [revision, setRevision] = useState(0);
+  const classId = Number(params.get('class_id')) || undefined;
+  const selectedClass = classes.find(item => item.id === classId);
+  const selected = students.find(item => item.id === selectedId);
 
   useEffect(() => {
-    fetchPredictions();
-  }, []);
+    let current = true;
+    if (!user) return;
+    const loadClasses = async () => {
+      try {
+        const response = user.role === 'teacher' ? await classService.getMyClasses()
+          : await classService.getAll({ status: 'ongoing', page: 1, limit: 100 });
+        let items: ClassOption[] = response.data || [];
+        // Fetch remaining pages rather than silently omitting larger centers.
+        if (user.role !== 'teacher') for (let page = 2; page <= Math.ceil((response.pagination?.total || 0) / 100); page++) {
+          const next = await classService.getAll({ status: 'ongoing', page, limit: 100 });
+          items = items.concat(next.data || []);
+        }
+        if (current) setClasses(items.filter(item => item.status === 'ongoing'));
+      } catch { if (current) message.error('Không tải được danh sách lớp'); }
+    };
+    loadClasses();
+    return () => { current = false; };
+  }, [user?.id, user?.role]);
 
-  const data = useMemo(() => {
-    return students
-      .filter((student) => student.dropout_risk !== null && student.dropout_risk !== undefined)
-      .filter((student) => !riskFilter || student.dropout_risk_level === riskFilter)
-      .sort((a, b) => Number(b.dropout_risk || 0) - Number(a.dropout_risk || 0));
-  }, [students, riskFilter]);
+  useEffect(() => {
+    const token = ++request.current;
+    setSelectedId(null);
+    setStudents([]);
+    setLoading(false);
+    if (!selectedClass) return;
+    setLoading(true);
+    Promise.all([classService.getById(selectedClass.id), classService.getDropoutRisk(selectedClass.id)])
+      .then(([details, snapshots]) => {
+        if (token !== request.current) return;
+        const risks = new Map<number, DropoutRiskView>((snapshots.data || []).map((item: DropoutRiskView) => [item.student_id!, item]));
+        setStudents((details.data?.classEnrollments || []).filter((item: any) => item.status === 'active')
+          .map((item: any) => ({ id: item.student_id, full_name: item.student?.full_name || 'Học viên', email: item.student?.email,
+            risk: risks.get(item.student_id) })));
+      }).catch(error => { if (token === request.current) message.error(error.message || 'Không tải được đánh giá'); })
+      .finally(() => { if (token === request.current) setLoading(false); });
+    return () => { request.current++; };
+  }, [selectedClass?.id, revision]);
 
-  const columns: ColumnsType<DropoutPredictionRow> = [
-    {
-      title: 'Học viên',
-      key: 'student',
-      render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          <span className="font-medium">{record.full_name}</span>
-          <span className="text-gray-500">{record.email || '-'}</span>
-        </Space>
-      ),
-    },
-    {
-      title: 'Loại',
-      key: 'targetType',
-      render: () => <Tag>Học viên</Tag>,
-    },
-    {
-      title: 'Điểm',
-      dataIndex: 'dropout_risk',
-      key: 'score',
-      sorter: (a, b) => Number(a.dropout_risk || 0) - Number(b.dropout_risk || 0),
-      render: (score: number) => (
-        <div style={{ width: 120 }}>
-          <Progress percent={Number(score || 0)} size="small" />
-        </div>
-      ),
-    },
-    {
-      title: 'Mức độ rủi ro',
-      dataIndex: 'dropout_risk_level',
-      key: 'risk',
-      render: (risk: string) => (
-        <Tag color={riskColors[risk] || 'default'}>
-          {riskLabels[risk] || risk}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Lý do chính',
-      key: 'reasons',
-      render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          {(record.dropout_risk_reasons || []).slice(0, 2).map((reason, index) => (
-            <span key={`${record.id}-${index}`}>{reason}</span>
-          ))}
-        </Space>
-      ),
-    },
-    {
-      title: 'Ngày dự đoán',
-      dataIndex: 'dropout_risk_updated_at',
-      key: 'createdAt',
-      render: (date: string) => (date ? new Date(date).toLocaleDateString('vi-VN') : '-'),
-    },
-    {
-      title: 'Hành động',
-      key: 'actions',
-      render: (_, record) => (
-        <Button type="link" size="small" href={`/lms/students/${record.id}`}>
-          Chi tiết
-        </Button>
-      ),
-    },
+  const evaluate = async (studentId?: number) => {
+    if (!selectedClass) return;
+    const token = request.current;
+    try {
+      setScoring(true);
+      if (studentId) {
+        const result = await studentService.scoreDropoutRisk(studentId, selectedClass.id);
+        if (!result.data) throw new Error(result.reason || 'Lớp không còn trong giai đoạn theo dõi');
+        if (token === request.current) setStudents(previous => previous.map(item => item.id === studentId
+          ? { ...item, risk: { ...result.data, limited_data: result.data?.snapshot?.limited_data } } : item));
+      } else {
+        const response = await classService.scoreDropoutRisk(selectedClass.id);
+        const failed = (response.data || []).filter((item: any) => !item.success).length;
+        if (failed) message.warning(`${failed} học viên chưa đánh giá được. Vui lòng thử lại.`);
+        if (token === request.current) setRevision(value => value + 1);
+      }
+    } catch (error: any) { message.error(error.message || 'Không đánh giá được'); }
+    finally { setScoring(false); }
+  };
+
+  const data = useMemo(() => students
+    .filter(student => !riskFilter || (riskFilter === 'pending' ? !student.risk?.risk_level : student.risk?.risk_level === riskFilter))
+    .filter(student => `${student.full_name} ${student.email || ''}`.toLocaleLowerCase('vi-VN').includes(search.toLocaleLowerCase('vi-VN')))
+    .sort((a, b) => supportOrder(b.risk) - supportOrder(a.risk) || (b.risk?.risk_score ?? -1) - (a.risk?.risk_score ?? -1)),
+  [students, riskFilter, search]);
+  const columns: ColumnsType<StudentRow> = [
+    { title: 'Học viên', key: 'student', render: (_, row) => <Space direction="vertical" size={0}>
+      <Button type="link" style={{ padding: 0 }} onClick={() => openDetail(`/lms/students/${row.id}?tab=classes`)}>{row.full_name}</Button>
+      <span className="text-xs text-gray-500">{row.email || '—'}</span>
+    </Space> },
+    { title: 'Nguy cơ bỏ học', key: 'score', width: 190, render: (_, row) => <RiskEstimate data={row.risk} showReason={false} onOpen={() => setSelectedId(row.id)} /> },
+    { title: 'Mức cần hỗ trợ', key: 'priority', width: 180, render: (_, row) => <SupportPriority data={row.risk} /> },
+    { title: 'Cập nhật', key: 'updated', width: 180, render: (_, row) => <span className="text-gray-500">{riskTime(row.risk?.evaluated_at)}</span> },
   ];
-
-  return (
-    <div>
-      <PageHeader
-        title="Dropout Risk"
-        breadcrumbs={[
-          { title: 'Dashboard', href: '/dashboard' },
-          { title: 'AI & Insights' },
-          { title: 'Dropout Risk' },
-        ]}
-      />
-
-      <div className="bg-white p-6 rounded-lg shadow-sm">
-        <Alert
-          type="info"
-          showIcon
-          className="mb-4"
-          message="Danh sách này chỉ hiển thị học viên đã được tính dropout risk."
-          description="Để tạo dữ liệu, vào LMS > Học viên > Chi tiết học viên và bấm Tính lại risk, hoặc điểm danh một buổi học để hệ thống tự cập nhật risk."
-        />
-        <div className="mb-4 flex flex-wrap gap-3">
-          <Select
-            placeholder="Loại"
-            style={{ width: 180 }}
-            allowClear
-            value="student"
-            options={[{ label: 'Học viên', value: 'student' }]}
-          />
-          <Select
-            placeholder="Mức độ rủi ro"
-            style={{ width: 180 }}
-            allowClear
-            value={riskFilter}
-            onChange={setRiskFilter}
-            options={[
-              { label: 'Thấp', value: 'low' },
-              { label: 'Trung bình', value: 'medium' },
-              { label: 'Cao', value: 'high' },
-            ]}
-          />
-          <Select
-            placeholder="Model"
-            style={{ width: 200 }}
-            allowClear
-            value="dropout-v2"
-            options={[{ label: 'Dropout Risk v2', value: 'dropout-v2' }]}
-          />
-        </div>
-
-        <Table
-          columns={columns}
-          dataSource={data}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            pageSize: 10,
-            showSizeChanger: true,
-            showTotal: (total) => `Tổng ${total} dự đoán`,
-          }}
-        />
+  return <div>
+    <PageHeader title="Cảnh báo bỏ học" breadcrumbs={[{ title: 'Dashboard', href: '/dashboard' }, { title: 'AI & Insights' }, { title: 'Cảnh báo bỏ học' }]}
+      actions={<Button icon={<ReloadOutlined />} onClick={() => setRevision(value => value + 1)} disabled={!selectedClass || scoring} loading={loading}>Làm mới</Button>} />
+    <div className="bg-white p-6 rounded-lg shadow-sm">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Select placeholder="Chọn lớp học" aria-label="Lớp cần đánh giá" showSearch optionFilterProp="label" style={{ minWidth: 280 }} value={classId}
+          onChange={value => setParams(previous => { const next = new URLSearchParams(previous); next.set('class_id', String(value)); return next; }, { replace: true, state: navigationState })}
+          options={classes.map(item => ({ value: item.id, label: item.name }))} />
+        <Button type="primary" disabled={!selectedClass || loading} loading={scoring} onClick={() => evaluate()}>Đánh giá lớp</Button>
       </div>
+      {selectedClass && <div className="mb-4 flex flex-wrap gap-3">
+        <Input prefix={<SearchOutlined />} placeholder="Tìm tên hoặc email học viên" allowClear value={search} onChange={event => setSearch(event.target.value)} style={{ width: 300 }} />
+        <Select placeholder="Tất cả mức hỗ trợ" style={{ width: 220 }} allowClear value={riskFilter} onChange={setRiskFilter}
+          options={[...Object.entries(supportLevels).map(([value, item]) => ({ value, label: item.label })), { value: 'pending', label: 'Chưa đánh giá / chưa đủ dữ liệu' }]} />
+      </div>}
+      <Table columns={columns} dataSource={data} rowKey="id" loading={loading} scroll={{ x: 760 }}
+        locale={{ emptyText: selectedClass ? 'Không có học viên phù hợp' : 'Chọn lớp để xem cảnh báo của học viên trong lớp đó' }}
+        pagination={{ pageSize: 10, showSizeChanger: true, showTotal: total => `${total} học viên` }} />
     </div>
-  );
+    <RiskDetailsDrawer open={!!selected} onClose={() => setSelectedId(null)} name={selected?.full_name} className={selectedClass?.name}
+      data={selected?.risk} loading={scoring} onEvaluate={selected ? () => evaluate(selected.id) : undefined}
+      onProfile={selected ? () => openDetail(`/lms/students/${selected.id}?tab=classes`) : undefined} />
+  </div>;
 }

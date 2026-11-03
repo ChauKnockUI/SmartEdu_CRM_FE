@@ -4,7 +4,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Form,
   Input,
   message,
   Select,
@@ -23,7 +22,8 @@ import {
   BellOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
-import { useParams, useNavigate } from 'react-router';
+import { useParams } from 'react-router';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { attendanceService } from '../../services/api/attendance.service';
 import { scheduleService } from '../../services/api/schedule.service';
 import { usePermissions } from '../../shared/hooks/usePermissions';
@@ -75,7 +75,7 @@ const statusConfig: Record<
 
 export function SessionDetailPage() {
   const { id: scheduleId } = useParams();
-  const navigate = useNavigate();
+  const { openDetail } = useDetailNavigation();
   const { user } = useAuth();
   const role = user?.role;
   const permissions = usePermissions();
@@ -290,7 +290,7 @@ export function SessionDetailPage() {
       width: 220,
       render: (name: string, record) =>
         role !== 'student' ? (
-          <Button type="link" onClick={() => navigate(`/lms/students/${record.student_id}`)}>
+          <Button type="link" onClick={() => openDetail(`/lms/students/${record.student_id}`)}>
             {name}
           </Button>
         ) : (
