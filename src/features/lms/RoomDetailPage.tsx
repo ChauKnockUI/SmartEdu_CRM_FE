@@ -3,18 +3,16 @@ import {
   Card, Descriptions, Tag, Button, Alert
 } from 'antd';
 import {
-  ArrowLeftOutlined,
   HomeOutlined, CheckCircleOutlined, CloseCircleOutlined
 } from '@ant-design/icons';
-import { useNavigate, useParams } from 'react-router';
+import { useParams } from 'react-router';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { PageHeader } from '../../shared/components/PageHeader';
-import { usePermissions } from '../../shared/hooks/usePermissions';
 import { roomService } from '@/services/api/room.service';
 
 export function RoomDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
-  const { can } = usePermissions();
+  const { goBack } = useDetailNavigation();
 
   const [room, setRoom] = useState<any>(null);
   const [loading, setLoading] = useState(false);
@@ -41,8 +39,8 @@ export function RoomDetailPage() {
     return (
       <div className="text-center p-8">
         <h2 className="text-xl font-semibold">Không tìm thấy phòng học</h2>
-        <Button type="primary" onClick={() => navigate('/lms/rooms')} className="mt-4">
-          Quay lại danh sách
+        <Button type="primary" onClick={() => goBack()} className="mt-4">
+          Quay lại
         </Button>
       </div>
     );
@@ -56,14 +54,7 @@ export function RoomDetailPage() {
     <div>
       <PageHeader
         title={room.name}
-        actions={
-          <Button
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/lms/rooms')}
-          >
-            Quay lại
-          </Button>
-        }
+
       />
 
       <div className="space-y-4">

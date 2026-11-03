@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Card,
   Tabs,
@@ -28,8 +28,12 @@ import {
   WarningOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
+import { RiskEstimate, SupportPriority, RiskDetailsDrawer } from '../../shared/components/DropoutRisk';
+import { type DropoutRiskView } from '../../shared/utils/dropoutRisk';
 import { PageHeader } from '../../shared/components/PageHeader';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { classTab } from '../../shared/utils/navigation';
 import { classService } from '@/services/api/class.service';
 import { studentService } from '@/services/api/student.service';
 import { scheduleService } from '@/services/api/schedule.service';
@@ -97,7 +101,8 @@ const formatDate = (date?: string) => {
 
 export function ClassDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const { openDetail, navigationState } = useDetailNavigation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const role = user?.role;
 
@@ -107,6 +112,23 @@ export function ClassDetailPage() {
   const [classItem, setClassItem] = useState<Class | null>(null);
   const [loading, setLoading] = useState(false);
   const [riskLoading, setRiskLoading] = useState(false);
+  const [classRiskResults, setClassRiskResults] = useState<Record<number, DropoutRiskView>>({});
+  const [riskFetching, setRiskFetching] = useState(false);
+  const [selectedRisk, setSelectedRisk] = useState<{ studentId: number; name: string } | null>(null);
+  const riskRequest = useRef(0);
+  useEffect(() => {
+    setClassRiskResults({});
+    setSelectedRisk(null);
+    const request = ++riskRequest.current;
+    if (!isAdmin && !isTeacher) return;
+    setRiskFetching(true);
+    classService.getDropoutRisk(Number(id)).then(res => {
+      if (request !== riskRequest.current) return;
+      setClassRiskResults(Object.fromEntries((res.data || []).map((item: DropoutRiskView) => [item.student_id, item])));
+    }).catch(error => { if (request === riskRequest.current) message.error(error.message); })
+      .finally(() => { if (request === riskRequest.current) setRiskFetching(false); });
+    return () => { riskRequest.current++; };
+  }, [id, isAdmin, isTeacher]);
 
   const [students, setStudents] = useState<any[]>([]);
   const [schedules, setSchedules] = useState<any[]>([]);
@@ -173,6 +195,8 @@ export function ClassDetailPage() {
   }, [id]);
 
   if (!classItem) return <div>Không tìm thấy lớp</div>;
+  const activeStudentIds = new Set<number>((classItem.classEnrollments || []).filter((item: any) => item.status === 'active').map((item: any) => item.student_id));
+  const activeClassRisks = Object.values(classRiskResults).filter(item => item.student_id && activeStudentIds.has(item.student_id));
 
   const handleEdit = () => {
     const daysArr = parseDbField<number>(classItem.schedule_days);
@@ -326,7 +350,17 @@ export function ClassDetailPage() {
   const handleScoreClassDropoutRisk = async () => {
     try {
       setRiskLoading(true);
+      const request = ++riskRequest.current;
       const res = await classService.scoreDropoutRisk(classItem.id);
+      if (request !== riskRequest.current) return;
+      const scored: typeof classRiskResults = {};
+      for (const item of res.data || []) {
+        if (item.success && item.data) scored[item.data.student_id] = { ...item.data, limited_data: item.data.snapshot?.limited_data };
+        else if (item.student_id) scored[item.student_id] = { class_id: classItem.id, student_id: item.student_id,
+          risk_score: null, model_status: item.success ? 'not_eligible' : 'unavailable',
+          evaluated_at: new Date().toISOString(), top_reasons: item.reason ? [item.reason] : [] };
+      }
+      setClassRiskResults(scored);
       message.success(res.message || 'Đã cập nhật dropout risk cho lớp');
       fetchClass();
     } catch (err: any) {
@@ -350,6 +384,8 @@ export function ClassDetailPage() {
       />
 
       <Tabs
+        activeKey={classTab(searchParams.get('tab'))}
+        onChange={key => setSearchParams(previous => { const next = new URLSearchParams(previous); next.set('tab', key); return next; }, { replace: true, state: navigationState })}
         items={[
           {
             key: 'overview',
@@ -357,13 +393,7 @@ export function ClassDetailPage() {
             children: (
               <Card
                 loading={loading}
-                extra={
-                  (isAdmin || isTeacher) ? (
-                    <Button icon={<WarningOutlined />} loading={riskLoading} onClick={handleScoreClassDropoutRisk}>
-                      Tính dropout risk lớp
-                    </Button>
-                  ) : null
-                }
+
               >
                 <Descriptions bordered column={2}>
                   <Descriptions.Item label="Tên lớp">{classItem.name}</Descriptions.Item>
@@ -416,18 +446,27 @@ export function ClassDetailPage() {
             label: 'Học viên',
             children: (
               <Card
-                extra={
-                  isAdmin ? (
-                    <Button type="primary" onClick={() => setEnrollModalOpen(true)}>
-                      Thêm học viên
-                    </Button>
-                  ) : null
-                }
+                title="Học viên"
+                extra={<Space wrap>
+                  {(isAdmin || isTeacher) && <Button type="primary" icon={<WarningOutlined />}
+                    loading={riskLoading} disabled={riskFetching || classItem.status !== 'ongoing'}
+                    onClick={handleScoreClassDropoutRisk}>Đánh giá nguy cơ bỏ học</Button>}
+                  {isAdmin && <Button onClick={() => setEnrollModalOpen(true)}>Thêm học viên</Button>}
+                </Space>}
               >
                 <p className="mb-4 text-gray-600">
                   Sĩ số: <strong>{classItem._count?.classEnrollments || 0}</strong> /{' '}
                   {classItem.max_students}
                 </p>
+
+                {(isAdmin || isTeacher) && <div className="mb-4 rounded-lg bg-slate-50 px-4 py-3 text-sm">
+                  <Space size={20} wrap>
+                    <span>Cần liên hệ: <strong>{activeClassRisks.filter(item => item.risk_level === 'high').length}</strong></span>
+                    <span>Cần theo dõi: <strong>{activeClassRisks.filter(item => item.risk_level === 'medium').length}</strong></span>
+                    <span>Chưa có ước tính: <strong>{activeStudentIds.size - activeClassRisks.filter(item => typeof item.risk_score === 'number').length}</strong></span>
+                    <span className="text-gray-500">Bấm “Xem đánh giá” để xem căn cứ và hướng xử lý.</span>
+                  </Space>
+                </div>}
 
                 <Table
                   rowKey="id"
@@ -435,62 +474,25 @@ export function ClassDetailPage() {
                   pagination={{ pageSize: 10 }}
                   dataSource={classItem.classEnrollments || []}
                   locale={{ emptyText: 'Chưa có học viên nào trong lớp' }}
+                  loading={riskLoading || riskFetching}
+                  scroll={{ x: 980 }}
                   columns={[
-                    {
-                      title: '#',
-                      width: 50,
-                      render: (_: any, __: any, index: number) => index + 1,
-                    },
-                    {
-                      title: 'Họ tên',
-                      render: (row: any) =>
-                        row.student?.full_name || `ID: ${row.student_id}`,
-                    },
-                    {
-                      title: 'Email',
-                      render: (row: any) => row.student?.email || '—',
-                    },
-                    {
-                      title: 'Số điện thoại',
-                      render: (row: any) => row.student?.phone || '—',
-                    },
-                    {
-                      title: 'Trạng thái',
-                      render: (row: any) => {
-                        const colorMap: Record<string, string> = {
-                          active: 'green',
-                          inactive: 'default',
-                          dropped: 'red',
-                        };
-
-                        return (
-                          <Tag color={colorMap[row.status] ?? 'default'}>
-                            {row.status === 'active'
-                              ? 'Đang học'
-                              : row.status === 'dropped'
-                                ? 'Đã nghỉ'
-                                : row.status}
-                          </Tag>
-                        );
-                      },
-                    },
-                    ...(isAdmin ? [{
-                      title: 'Thao tác',
-                      render: (row: any) => (
-                        <Popconfirm
-                          title="Xác nhận hủy ghi danh"
-                          description={`Bạn có chắc muốn xóa học viên ${row.student?.full_name || ''} khỏi lớp này?`}
-                          onConfirm={() => handleUnenroll(row.student_id || row.student?.id)}
-                          okText="Xóa"
-                          cancelText="Hủy"
-                          okButtonProps={{ danger: true }}
-                        >
-                          <Button danger size="small" icon={<DeleteOutlined />}>
-                            Xóa khỏi lớp
-                          </Button>
-                        </Popconfirm>
-                      ),
-                    }] : []),
+                    { title: 'Học viên', width: 230, render: (row: any) => <Space direction="vertical" size={0}>
+                      <Button type="link" style={{ padding: 0 }} onClick={() => openDetail(`/lms/students/${row.student_id}`)}>{row.student?.full_name || `ID: ${row.student_id}`}</Button>
+                      <span className="text-xs text-gray-500">{row.student?.email || '—'}</span>
+                    </Space> },
+                    { title: 'Điện thoại', width: 125, render: (row: any) => row.student?.phone || '—' },
+                    { title: 'Tình trạng', width: 105, render: (row: any) => <Tag color={row.status === 'active' ? 'green' : 'default'}>
+                      {row.status === 'active' ? 'Đang học' : row.status === 'dropped' ? 'Đã nghỉ' : row.status === 'completed' ? 'Hoàn thành' : row.status}
+                    </Tag> },
+                    { title: 'Mức cần hỗ trợ', width: 150, render: (row: any) => <SupportPriority data={classRiskResults[row.student_id]} /> },
+                    { title: 'Nguy cơ bỏ học', width: 170, render: (row: any) => <RiskEstimate data={classRiskResults[row.student_id]} showReason={false}
+                      onOpen={() => setSelectedRisk({ studentId: row.student_id, name: row.student?.full_name || `ID: ${row.student_id}` })} /> },
+                    { title: 'Thao tác', width: 150, render: (row: any) => <Space size={4}>
+                      {isAdmin && <Popconfirm title="Xóa học viên khỏi lớp?" onConfirm={() => handleUnenroll(row.student_id)} okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }}>
+                        <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="Xóa học viên khỏi lớp" title="Xóa học viên khỏi lớp" />
+                      </Popconfirm>}
+                    </Space> },
                   ]}
                 />
               </Card>
@@ -551,7 +553,7 @@ export function ClassDetailPage() {
                               type="primary"
                               size="small"
                               icon={<CheckCircleOutlined />}
-                              onClick={() => navigate(`/lms/sessions/${row.id}`)}
+                              onClick={() => openDetail(`/lms/sessions/${row.id}`)}
                             >
                               Điểm danh
                             </Button>
@@ -559,7 +561,7 @@ export function ClassDetailPage() {
 
                           <Button
                             size="small"
-                            onClick={() => navigate(`/lms/sessions/${row.id}`)}
+                            onClick={() => openDetail(`/lms/sessions/${row.id}`)}
                           >
                             Chi tiết
                           </Button>
@@ -645,6 +647,23 @@ export function ClassDetailPage() {
           },
         ]}
       />
+
+      <RiskDetailsDrawer open={!!selectedRisk} onClose={() => setSelectedRisk(null)} name={selectedRisk?.name}
+        className={classItem.name} data={selectedRisk ? classRiskResults[selectedRisk.studentId] : undefined}
+        loading={riskLoading} onEvaluate={selectedRisk && classItem.status === 'ongoing' ? async () => {
+          const classId = classItem.id;
+          const studentId = selectedRisk.studentId;
+          const request = riskRequest.current;
+          try {
+            setRiskLoading(true);
+            const result = await studentService.scoreDropoutRisk(studentId, classId);
+            if (!result.data) throw new Error(result.reason || 'Lớp không còn trong giai đoạn theo dõi');
+            if (request === riskRequest.current) setClassRiskResults(previous => ({ ...previous,
+              [studentId]: { ...result.data, limited_data: result.data?.snapshot?.limited_data } }));
+          } catch (error: any) { message.error(error.message || 'Không đánh giá được học viên'); }
+          finally { setRiskLoading(false); }
+        } : undefined}
+        onProfile={selectedRisk ? () => openDetail(`/lms/students/${selectedRisk.studentId}?tab=classes`) : undefined} />
 
       <Modal
         title="Chỉnh sửa lớp học"

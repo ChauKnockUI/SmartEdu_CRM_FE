@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Card,
   Tabs,
@@ -22,15 +22,18 @@ import {
   KeyOutlined,
   CopyOutlined,
   TeamOutlined,
-  CalendarOutlined,
   MailOutlined,
   PhoneOutlined,
-  WarningOutlined,
 } from '@ant-design/icons';
-import { useParams, useNavigate } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
+import { RiskEstimate, RiskDetailsDrawer } from '../../shared/components/DropoutRisk';
+import { type DropoutRiskView } from '../../shared/utils/dropoutRisk';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { useAuth } from '../../shared/contexts/AuthContext';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { studentService } from '@/services/api/student.service';
 import { financeService } from '@/services/api/finance.service';
+import dayjs from 'dayjs';
 
 type Student = any;
 
@@ -58,38 +61,53 @@ const DAY_MAP: Record<string, string> = {
   Sat: 'Thứ 7',
 };
 
-const formatSchedule = (days?: string, time?: string) => {
-  if (!days) return 'Chưa có lịch';
+const parseScheduleList = (value?: string | Array<string | number>): string[] => {
+  if (Array.isArray(value)) return value.map(String);
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch { /* Older records may store comma-separated values. */ }
+  return value.split(',').map(item => item.trim());
+};
 
-  const formattedDays = days
-    .split(',')
-    .map((d) => DAY_MAP[d.trim()] || d)
-    .join(', ');
-
-  return `${formattedDays} (${time || ''})`;
+const formatSchedule = (days?: string | number[], time?: string | string[]) => {
+  const labels = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+  const formattedDays = parseScheduleList(days)
+    .filter(Boolean)
+    .map(day => DAY_MAP[day] || labels[Number(day)])
+    .filter(Boolean)
+    .sort((a, b) => (labels.indexOf(a) || 7) - (labels.indexOf(b) || 7))
+    .join(' • ');
+  const formattedTime = parseScheduleList(time)
+    .map(value => value.match(/(?:^|T)(\d{2}:\d{2})/)?.[1])
+    .filter(Boolean)
+    .join(' – ');
+  return [formattedDays, formattedTime].filter(Boolean).join(' · ') || 'Chưa có lịch';
 };
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
 
-const RISK_COLORS: Record<string, string> = {
-  low: 'green',
-  medium: 'orange',
-  high: 'red',
-};
-
-const RISK_LABELS: Record<string, string> = {
-  low: 'Thấp',
-  medium: 'Trung bình',
-  high: 'Cao',
-};
-
 export function StudentDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const currentStudentId = useRef(id);
+  currentStudentId.current = id;
+  const { classId: contextClassId, openDetail, navigationState } = useDetailNavigation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { user } = useAuth();
+  const canReview = ['admin', 'sale', 'teacher'].includes(user?.role || '');
+  const [classRisks, setClassRisks] = useState<Record<number, DropoutRiskView>>({});
+  const [riskFetching, setRiskFetching] = useState(false);
+  const [riskError, setRiskError] = useState(false);
+  const selectedClassId = Number(searchParams.get('risk_class')) || null;
+  const requestedTab = searchParams.get('tab');
+  const activeTab = requestedTab && ['overview', 'classes', 'schedule', 'finance'].includes(requestedTab)
+    ? requestedTab : contextClassId || selectedClassId ? 'classes' : 'overview';
 
   const [student, setStudent] = useState<Student | null>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [riskLoading, setRiskLoading] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
@@ -101,8 +119,10 @@ export function StudentDetailPage() {
     try {
       setLoading(true);
 
-      const res = await studentService.getById(Number(id));
-      const invoiceRes = await financeService.getStudentInvoices(Number(id));
+      const [res, invoiceRes] = await Promise.all([
+        studentService.getById(Number(id)), financeService.getStudentInvoices(Number(id)),
+      ]);
+      if (currentStudentId.current !== id) return;
       const data = res.data;
 
       setStudent(data);
@@ -116,15 +136,42 @@ export function StudentDetailPage() {
       });
     } catch (err) {
       console.error(err);
-      message.error('Không tải được học viên');
+      if (currentStudentId.current === id) message.error('Không tải được học viên');
     } finally {
-      setLoading(false);
+      if (currentStudentId.current === id) setLoading(false);
     }
   };
 
   useEffect(() => {
+    setStudent(null);
+    setInvoices([]);
+    setRiskLoading(false);
     fetchStudent();
   }, [id]);
+  useEffect(() => {
+    let current = true;
+    setClassRisks({});
+    setRiskError(false);
+    if (!canReview) return;
+    setRiskFetching(true);
+    studentService.getClassDropoutRisks(Number(id)).then(res => {
+      if (current) setClassRisks(Object.fromEntries((res.data || []).map((item: DropoutRiskView) => [item.class_id, item])));
+    }).catch(error => { if (current) { setRiskError(true); message.error(error.message); } })
+      .finally(() => { if (current) setRiskFetching(false); });
+    return () => { current = false; };
+  }, [id, canReview]);
+
+  const openRisk = (classId: number) => setSearchParams(previous => {
+    const next = new URLSearchParams(previous);
+    next.set('tab', 'classes');
+    next.set('risk_class', String(classId));
+    return next;
+  }, { replace: true, state: navigationState });
+  const closeRisk = () => setSearchParams(previous => {
+    const next = new URLSearchParams(previous);
+    next.delete('risk_class');
+    return next;
+  }, { replace: true, state: navigationState });
 
   const handleUpdate = async () => {
     try {
@@ -151,20 +198,18 @@ export function StudentDetailPage() {
   };
 
   const handleScoreDropoutRisk = async () => {
+    if (!selectedClassId) return;
     try {
-      const activeEnrollment = (student?.classEnrollments || []).find((item: any) => item.status === 'active') || student?.classEnrollments?.[0];
-      const classId = activeEnrollment?.class_id || activeEnrollment?.class?.id;
-
-      if (!classId) {
-        message.warning('Học viên chưa có lớp để tính dropout risk');
-        return;
-      }
-
-      await studentService.scoreDropoutRisk(Number(id), Number(classId));
-      message.success('Đã cập nhật dropout risk');
-      fetchStudent();
+      setRiskLoading(true);
+      const result = await studentService.scoreDropoutRisk(Number(id), selectedClassId);
+      if (currentStudentId.current !== id) return;
+      if (!result.data) throw new Error(result.reason || 'Lớp không còn trong giai đoạn theo dõi');
+      setClassRisks(previous => ({ ...previous, [selectedClassId]: { ...result.data, limited_data: result.data?.snapshot?.limited_data } }));
+      message.success('Đã cập nhật đánh giá nguy cơ bỏ học');
     } catch (err: any) {
-      message.error(err.message || 'Không tính được dropout risk');
+      message.error(err.message || 'Không cập nhật được đánh giá');
+    } finally {
+      if (currentStudentId.current === id) setRiskLoading(false);
     }
   };
 
@@ -174,16 +219,18 @@ export function StudentDetailPage() {
   };
 
   if (!student) {
-    return <div>Không tìm thấy học viên</div>;
+    return loading ? <Card loading /> : <div>Không tìm thấy học viên</div>;
   }
 
   const enrolledClasses = student.classEnrollments || [];
+  const activeClasses = enrolledClasses.filter((item: any) => item.status === 'active' && ['ongoing', 'upcoming'].includes(item.class?.status));
+  const selectedClass = activeClasses.find((item: any) => item.class_id === selectedClassId);
 
   const classColumns = [
     {
       title: 'Lớp học',
       render: (_: any, record: any) => (
-        <span className="font-medium">{record.class?.name}</span>
+        <Button type="link" style={{ padding: 0 }} onClick={() => openDetail(`/lms/classes/${record.class_id}?tab=students`)}>{record.class?.name}</Button>
       ),
     },
     {
@@ -196,26 +243,22 @@ export function StudentDetailPage() {
         record.class?.teacher?.full_name || 'Chưa phân công',
     },
     {
-      title: 'Phòng',
-      render: (_: any, record: any) =>
-        record.class?.room?.name || 'Chưa xếp phòng',
-    },
-    {
-      title: 'Lịch học',
-      render: (_: any, record: any) =>
-        formatSchedule(
-          record.class?.schedule_days,
-          record.class?.schedule_time
-        ),
-    },
-    {
       title: 'Trạng thái',
       render: (_: any, record: any) => (
-        <Tag color={STATUS_COLORS[record.class?.status] || 'default'}>
-          {STATUS_LABELS[record.class?.status] || record.class?.status}
+        <Tag color={record.class?.status === 'ongoing' ? 'green' : 'blue'}>
+          {record.class?.status === 'ongoing' ? 'Đang học' : 'Sắp khai giảng'}
         </Tag>
       ),
     },
+    ...(canReview ? [{
+      title: 'Nguy cơ bỏ học',
+      width: 180,
+      render: (_: any, record: any) => record.class?.status !== 'ongoing' ? <Typography.Text type="secondary">Chưa bắt đầu</Typography.Text>
+        : riskError ? <Typography.Text type="secondary">Không tải được đánh giá</Typography.Text>
+        : riskFetching ? <Typography.Text type="secondary">Đang tải…</Typography.Text>
+        : classRisks[record.class_id] ? <RiskEstimate data={classRisks[record.class_id]} showReason={false} onOpen={() => openRisk(record.class_id)} />
+        : <Typography.Text type="secondary">—</Typography.Text>,
+    }] : []),
   ];
 
   const scheduleColumns = [
@@ -236,11 +279,11 @@ export function StudentDetailPage() {
       render: (_: any, record: any) => (
         <>
           {record.class?.start_date
-            ? new Date(record.class.start_date).toLocaleDateString('vi-VN')
+            ? dayjs(record.class.start_date).format('DD/MM/YYYY')
             : '-'}
           {' → '}
           {record.class?.end_date
-            ? new Date(record.class.end_date).toLocaleDateString('vi-VN')
+            ? dayjs(record.class.end_date).format('DD/MM/YYYY')
             : '-'}
         </>
       ),
@@ -267,7 +310,6 @@ export function StudentDetailPage() {
   return (
     <div>
       <PageHeader
-        title={student.full_name}
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'LMS' },
@@ -293,6 +335,13 @@ export function StudentDetailPage() {
       />
 
       <Tabs
+        activeKey={activeTab}
+        onChange={key => setSearchParams(previous => {
+          const next = new URLSearchParams(previous);
+          next.set('tab', key);
+          next.delete('risk_class');
+          return next;
+        }, { replace: true, state: navigationState })}
         items={[
           {
             key: 'overview',
@@ -304,7 +353,7 @@ export function StudentDetailPage() {
                     <Card>
                       <Statistic
                         title="Số lớp đang học"
-                        value={enrolledClasses.length}
+                        value={activeClasses.length}
                         prefix={<TeamOutlined />}
                       />
                     </Card>
@@ -328,42 +377,6 @@ export function StudentDetailPage() {
                     </Card>
                   </Col>
                 </Row>
-
-                <Card className="mb-4" loading={loading}>
-                  <Row gutter={16} align="middle">
-                    <Col span={6}>
-                      <Statistic
-                        title="Dropout risk"
-                        value={student.dropout_risk ?? 0}
-                        suffix="%"
-                        precision={1}
-                        prefix={<WarningOutlined />}
-                      />
-                    </Col>
-                    <Col span={6}>
-                      <Tag color={RISK_COLORS[student.dropout_risk_level] || 'default'}>
-                        {student.dropout_risk_level ? RISK_LABELS[student.dropout_risk_level] || student.dropout_risk_level : 'Chưa tính'}
-                      </Tag>
-                    </Col>
-                    <Col span={8}>
-                      <Space direction="vertical" size={4}>
-                        {(student.dropout_risk_reasons || []).slice(0, 3).map((reason: string, index: number) => (
-                          <Typography.Text key={`${reason}-${index}`}>{reason}</Typography.Text>
-                        ))}
-                        {student.dropout_risk_updated_at && (
-                          <Typography.Text type="secondary">
-                            Cập nhật: {new Date(student.dropout_risk_updated_at).toLocaleString('vi-VN')}
-                          </Typography.Text>
-                        )}
-                      </Space>
-                    </Col>
-                    <Col span={4}>
-                      <Button onClick={handleScoreDropoutRisk}>
-                        Tính lại risk
-                      </Button>
-                    </Col>
-                  </Row>
-                </Card>
 
                 <Card loading={loading}>
                   <Descriptions bordered column={2}>
@@ -418,12 +431,13 @@ export function StudentDetailPage() {
             key: 'classes',
             label: 'Lớp đang học',
             children: (
-              <Card title={`Danh sách lớp (${enrolledClasses.length})`}>
+              <Card title={`Lớp đang học (${activeClasses.length})`}>
                 <Table
                   rowKey="id"
-                  dataSource={enrolledClasses}
+                  dataSource={activeClasses}
                   columns={classColumns}
                   pagination={false}
+                  scroll={{ x: 900 }}
                 />
               </Card>
             ),
@@ -459,6 +473,11 @@ export function StudentDetailPage() {
           },
         ]}
       />
+
+      <RiskDetailsDrawer open={canReview && !!selectedClass && !!classRisks[selectedClassId!]}
+        onClose={closeRisk} name={student.full_name} className={selectedClass?.class?.name}
+        data={selectedClassId ? classRisks[selectedClassId] : undefined} loading={riskLoading}
+        onEvaluate={selectedClass?.class?.status === 'ongoing' ? handleScoreDropoutRisk : undefined} />
 
       {/* EDIT */}
       <Modal
