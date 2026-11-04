@@ -11,9 +11,12 @@ export interface DropoutRiskView {
   student_id?: number;
   score_type?: string;
   academic_score?: number | null;
+  model_score?: number | null;
+  model_includes_finance?: boolean;
   evidence?: {
     attendance: { attended: number; recorded: number; absent: number; consecutive: number };
-    tuition: { overdue_days: number; overdue_count: number; paid_late_days: number };
+    tuition: { known?: boolean; overdue_days: number; overdue_count: number; paid_late_days: number };
+    model?: { flagged: boolean; includes_finance: boolean };
     academic: { flagged: boolean; passed: number; assessed: number; scored: number };
   } | null;
   hybrid?: {
@@ -22,6 +25,7 @@ export interface DropoutRiskView {
     minimum_score: number;
     minimum_reasons: string[];
     available_components: number;
+    total_components?: number;
     missing_components: string[];
     components: Array<{ key: string; label: string; score: number | null; weight: number;
       effective_weight: number; contribution: number | null }>;
@@ -57,7 +61,7 @@ export function studentRiskView(student: {
 
 export function warningReasons(data?: DropoutRiskView) {
   return (data?.top_reasons || [])
-    .filter(reason => !/^(\[(Tổng hợp|Dữ liệu)\]|Chưa có|Chưa đủ|Chưa đến mốc|Model tạm|Model học tập chưa|Ước tính sớm)/i.test(reason))
+    .filter(reason => !/^(\[(Tổng hợp|Dữ liệu)\]|Chưa có|Chưa đủ|Chưa đến mốc|Model tạm|Model học tập(?: và học phí)? chưa|Ước tính sớm)/i.test(reason))
     .map(reason => {
       if (reason.startsWith('[Model học tập]')) {
         const facts = reason.match(/Dữ liệu: ([^.]+)/)?.[1];
@@ -79,6 +83,7 @@ export function riskHighlights(data?: DropoutRiskView) {
   if (!data?.evidence) return warningReasons(data);
   const { attendance, tuition, academic } = data.evidence;
   const facts: string[] = [];
+  if (data.evidence.model?.flagged && data.evidence.model.includes_finance) facts.push('AI học tập và học phí cần theo dõi');
   if (attendance.consecutive >= 2) facts.push(`Vắng ${attendance.consecutive} buổi liên tiếp`);
   if (tuition.overdue_days > 0) facts.push(`Học phí quá hạn ${tuition.overdue_days} ngày`);
   if (academic.flagged && academic.assessed > 0) facts.push(`Đạt ${academic.passed}/${academic.assessed} bài đánh giá`);

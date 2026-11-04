@@ -27,7 +27,7 @@ export function RiskEstimate({ data, showReason = true, onOpen }: { data?: Dropo
         onClick={onOpen} aria-label={`Xem đánh giá ${data!.risk_score!.toFixed(1)}% của lớp này`}>{data!.risk_score!.toFixed(1)}%</Button>
         : <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums', fontSize: 16 }}>{data!.risk_score!.toFixed(1)}%</span>}
     </Tooltip>
-    {!onOpen && (data?.hybrid && data.hybrid.available_components < 3 ? <Tag>Dữ liệu một phần</Tag>
+    {!onOpen && (data?.hybrid && data.hybrid.available_components < (data.hybrid.total_components ?? 3) ? <Tag>Dữ liệu một phần</Tag>
       : data?.limited_data && <Tag>Ước tính sớm</Tag>)}
   </Space>
     {showReason && facts.length > 0 && <div className="mt-1 text-xs text-gray-500" style={{ maxWidth: 230 }}>
@@ -71,14 +71,14 @@ export function RiskDetails({ data }: { data?: DropoutRiskView }) {
       </div>
       <div className="py-3"><div className="mb-1 text-gray-500">Học phí của lớp</div>
         {data.evidence.tuition.overdue_days > 0 ? <span>{data.evidence.tuition.overdue_count} khoản quá hạn <strong>{data.evidence.tuition.overdue_days} ngày</strong></span>
-          : data.hybrid?.components.some(part => part.key === 'tuition' && part.score !== null) ? <span>Không có khoản quá hạn</span> : <span>Chưa có thông tin học phí</span>}
+          : data.evidence.tuition.known || data.hybrid?.components.some(part => part.key === 'tuition' && part.score !== null) ? <span>Không có khoản quá hạn</span> : <span>Chưa có thông tin học phí</span>}
         {data.evidence.tuition.paid_late_days > 0 && <div className="mt-1 text-gray-500">Từng đóng trễ {data.evidence.tuition.paid_late_days} ngày</div>}
       </div>
     </div>}
     {state === 'scored' && <div>
       {!data?.evidence && reasons.length > 0 && <ul className="m-0 pl-5 space-y-1 text-sm">{reasons.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}
       {(missing.length > 0 || data?.model_status === 'unavailable') && <p className="mt-2 mb-0 text-sm text-gray-500">
-        {data?.model_status === 'unavailable' ? 'Chưa lấy được kết quả học tập.'
+        {data?.model_status === 'unavailable' ? 'Chưa lấy được kết quả AI.'
           : `Còn thiếu thông tin ${missing.join(', ')}.`}
       </p>}
     </div>}
