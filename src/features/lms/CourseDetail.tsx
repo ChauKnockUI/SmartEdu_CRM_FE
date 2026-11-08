@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Card, Descriptions, Tag, Button, Table, Space, Statistic, Row, Col, message } from 'antd';
-import { ArrowLeftOutlined, EditOutlined, TeamOutlined, BookOutlined, DollarOutlined } from '@ant-design/icons';
-import { useNavigate, useParams } from 'react-router';
+import { Card, Descriptions, Tag, Button, Table, Statistic, Row, Col, message } from 'antd';
+import { EditOutlined, TeamOutlined, BookOutlined, DollarOutlined } from '@ant-design/icons';
+import { useParams } from 'react-router';
 import type { ColumnsType } from 'antd/es/table';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { courseService } from '@/services/api/course.service';
 
 export function CourseDetailPage() {
   const { id } = useParams();
-  const navigate = useNavigate();
+  const { openDetail, goBack } = useDetailNavigation();
   const { can } = usePermissions();
   const [course, setCourse] = useState<any>(null);
 
@@ -53,15 +54,15 @@ export function CourseDetailPage() {
     return (
       <div className="text-center p-8">
         <h2 className="text-xl font-semibold">Không tìm thấy khóa học</h2>
-        <Button type="primary" onClick={() => navigate('/lms/courses')} className="mt-4">
-          Quay lại danh sách
+        <Button type="primary" onClick={() => goBack()} className="mt-4">
+          Quay lại
         </Button>
       </div>
     );
   }
 
   const handleViewClass = (classId: string) => {
-    navigate(`/lms/classes/${classId}`);
+    openDetail(`/lms/classes/${classId}`);
   };
   const totalStudents = 0;
 
@@ -158,13 +159,6 @@ export function CourseDetailPage() {
         title={course.name}
         actions={
           <>
-            <Button
-              icon={<ArrowLeftOutlined />}
-              onClick={() => navigate('/lms/courses')}
-            >
-              Quay lại
-            </Button>
-
             {can('courses', 'write') && (
               <Button icon={<EditOutlined />}>
                 Chỉnh sửa

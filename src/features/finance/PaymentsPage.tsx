@@ -71,6 +71,7 @@ export function PaymentsPage() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('collecting');
   const [form] = Form.useForm();
@@ -161,14 +162,24 @@ export function PaymentsPage() {
   };
 
   const submitPayment = async () => {
+    if (paymentSubmitting) return;
+    setPaymentSubmitting(true);
     try {
       const values = await form.validateFields();
-      await financeService.recordPayment(selectedInvoice.id, values);
-      message.success('Đã ghi nhận thanh toán');
+      const result = await financeService.recordPayment(selectedInvoice.id, values);
+      if (result.data?.dropout_risk_update === 'failed') {
+        message.warning('Đã ghi nhận thanh toán. Chưa cập nhật được nguy cơ bỏ học; hãy đánh giá lại trong hồ sơ học viên.');
+      } else if (result.data?.dropout_risk_update === 'partial') {
+        message.warning('Đã ghi nhận thanh toán và cập nhật cảnh báo. AI đang tạm gián đoạn; hãy đánh giá lại sau.');
+      } else {
+        message.success('Đã ghi nhận thanh toán');
+      }
       setPaymentOpen(false);
       loadInvoices();
     } catch (err: any) {
       message.error(err.message || 'Ghi nhận thanh toán thất bại');
+    } finally {
+      setPaymentSubmitting(false);
     }
   };
 
@@ -356,6 +367,11 @@ export function PaymentsPage() {
         open={paymentOpen}
         onCancel={() => setPaymentOpen(false)}
         onOk={submitPayment}
+        confirmLoading={paymentSubmitting}
+        cancelButtonProps={{ disabled: paymentSubmitting }}
+        closable={!paymentSubmitting}
+        maskClosable={!paymentSubmitting}
+        keyboard={!paymentSubmitting}
         okText="Ghi nhận"
       >
         {selectedInvoice && (

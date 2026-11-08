@@ -155,4 +155,10 @@ export const classService = {
 
     return json;
   },
+  getDropoutRisk: async (classId: number) => {
+    const res = await fetch(`${config.baseURL}/classes/${classId}/dropout-risk`, { headers: getAuthHeader() });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Không tải được kết quả đánh giá');
+    return json;
+  },
 };
