@@ -1,40 +1,36 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Button,
   Card,
   Descriptions,
   Drawer,
+  Dropdown,
   Empty,
   Form,
   Input,
   message,
   Modal,
-  Progress,
+  Pagination,
   Select,
   Space,
   Spin,
+  Steps,
   Tabs,
   Tag,
   Timeline,
 } from 'antd';
-import { EditOutlined, MailOutlined, PhoneOutlined, PlusOutlined, RobotOutlined, UserAddOutlined } from '@ant-design/icons';
+import { PhoneOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { useParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useAuth } from '../../shared/contexts/AuthContext';
-import { leadService } from '@/services/api/lead.service';
+import { leadService, type LeadSourceOption } from '@/services/api/lead.service';
 import { courseService } from '@/services/api/course.service';
 import { userService } from '@/services/api/user.service';
-
-const statusColors: Record<string, string> = {
-  new: 'blue',
-  contacted: 'cyan',
-  interested: 'gold',
-  trial: 'purple',
-  enrolled: 'green',
-  lost: 'red',
-};
+import { LeadConsultationPanel } from './components/LeadConsultationPanel';
+import { MarkLostModal } from './components/MarkLostModal';
+import { getEditableLeadSources, getLeadSourceLabel } from './leadSources';
 
 const statusLabels: Record<string, string> = {
   new: 'Mới',
@@ -44,17 +40,6 @@ const statusLabels: Record<string, string> = {
   enrolled: 'Đã đăng ký',
   lost: 'Thất bại',
 };
-
-const sourceOptions = [
-  { label: 'Facebook Ads', value: 'facebook' },
-  { label: 'Google Ads', value: 'google_ads' },
-  { label: 'Website Organic', value: 'website_organic' },
-  { label: 'TikTok', value: 'tiktok' },
-  { label: 'Giới thiệu', value: 'referral' },
-  { label: 'Khác', value: 'other' },
-];
-
-const sourceLabels = Object.fromEntries(sourceOptions.map((item) => [item.value, item.label]));
 
 const occupationLabels: Record<string, string> = {
   student_y1_y2: 'Sinh viên năm 1-2',
@@ -70,24 +55,26 @@ const studyPurposeLabels: Record<string, string> = {
   improve: 'Cải thiện tiếng Anh',
 };
 
-const recommendationLabels: Record<string, string> = {
-  HOT_LEAD: 'Lead nóng',
-  WARM_LEAD: 'Lead tiềm năng',
-  COLD_LEAD: 'Lead lạnh',
-};
-
-const recommendationColors: Record<string, string> = {
-  HOT_LEAD: 'green',
-  WARM_LEAD: 'gold',
-  COLD_LEAD: 'default',
-};
-
 const activityLabels: Record<string, string> = {
   call: 'Gọi điện',
   email: 'Email',
   sms: 'SMS',
   meeting: 'Tư vấn trực tiếp',
   note: 'Ghi chú',
+  status_change: 'Cập nhật trạng thái',
+};
+
+const engagementLabels: Record<string, string> = {
+  positive_interaction: 'Có phản hồi tích cực',
+  interested_need_time: 'Quan tâm, cần thêm thời gian',
+  busy_call_back: 'Bận, hẹn gọi lại',
+  rejected: 'Từ chối',
+  not_answering: 'Không nghe máy',
+  wrong_number: 'Sai số điện thoại',
+  unknown: 'Chưa có phản hồi',
+  high: 'Có phản hồi tích cực',
+  medium: 'Quan tâm, cần thêm thời gian',
+  low: 'Bận, hẹn gọi lại',
 };
 
 const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }));
@@ -98,21 +85,21 @@ function formatDate(value?: string | null) {
   return value ? dayjs(value).format('DD/MM/YYYY HH:mm') : '-';
 }
 
-function getLeadScore(lead: any) {
-  const rawScore = Number(lead?.aiScore?.probability_score ?? lead?.score ?? 0);
-  return rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
-}
-
-function getScoreColor(score: number) {
-  if (score >= 80) return '#389e0d';
-  if (score >= 60) return '#d48806';
-  return '#cf1322';
-}
-
 export function LeadDetailPage() {
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const [lead, setLead] = useState<any>(null);
+  const [sourceOptions, setSourceOptions] = useState<LeadSourceOption[]>([]);
+  const [activities, setActivities] = useState<any[]>([]);
+  const [latestActivities, setLatestActivities] = useState<any[]>([]);
+  const [activitiesLoading, setActivitiesLoading] = useState(false);
+  const [activitiesError, setActivitiesError] = useState('');
+  const [activityPagination, setActivityPagination] = useState({ current: 1, total: 0, pageSize: 20 });
+  const [lostOpen, setLostOpen] = useState(false);
+  const detailRequest = useRef(0);
+  const historyRequest = useRef(0);
+  const refreshTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
@@ -123,20 +110,41 @@ export function LeadDetailPage() {
   const [activityOpen, setActivityOpen] = useState(false);
   const [form] = Form.useForm();
   const [activityForm] = Form.useForm();
+  const activityType = Form.useWatch('type', activityForm);
 
   const canManageLead = user?.role === 'admin' || user?.role === 'sale';
 
   const fetchDetail = async () => {
     if (!id) return;
+    const requestId = ++detailRequest.current;
     try {
       setLoading(true);
       const res = await leadService.getById(id);
+      if (requestId !== detailRequest.current) return;
       setLead(res.data);
     } catch (err: any) {
       console.error(err);
       message.error(err.message || 'Không tải được thông tin lead');
     } finally {
-      setLoading(false);
+      if (requestId === detailRequest.current) setLoading(false);
+    }
+  };
+
+  const fetchActivities = async (page = 1) => {
+    if (!id) return;
+    const requestId = ++historyRequest.current;
+    setActivitiesLoading(true);
+    try {
+      const res = await leadService.getActivities(id, { page, limit: 20 });
+      if (requestId !== historyRequest.current) return;
+      setActivities(res.data || []);
+      if (page === 1) setLatestActivities(res.data || []);
+      setActivityPagination({ current: res.pagination?.page || page, total: res.pagination?.total || 0, pageSize: 20 });
+      setActivitiesError('');
+    } catch (err: any) {
+      if (requestId === historyRequest.current) setActivitiesError(err.message || 'Không tải được lịch sử chăm sóc');
+    } finally {
+      if (requestId === historyRequest.current) setActivitiesLoading(false);
     }
   };
 
@@ -146,6 +154,15 @@ export function LeadDetailPage() {
       setCourses(res.data || []);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const fetchSources = async () => {
+    try {
+      const res = await leadService.getSources();
+      setSourceOptions(res.data);
+    } catch (err: any) {
+      message.error(err.message || 'Không tải được danh mục nguồn lead');
     }
   };
 
@@ -161,18 +178,44 @@ export function LeadDetailPage() {
   };
 
   useEffect(() => {
+    setLead(null);
+    setActivities([]);
+    setLatestActivities([]);
     fetchDetail();
+    fetchActivities();
+    fetchSources();
     fetchCourses();
     fetchSales();
+    return () => {
+      detailRequest.current++;
+      historyRequest.current++;
+      refreshTimers.current.forEach(clearTimeout);
+      refreshTimers.current = [];
+    };
   }, [id, user?.role]);
 
-  const score = useMemo(() => getLeadScore(lead), [lead]);
+  const queueRefresh = () => {
+    refreshTimers.current.push(setTimeout(() => { fetchDetail(); fetchActivities(); }, 2500));
+  };
+
+  useEffect(() => {
+    if (searchParams.get('contact') !== '1' || !lead || String(lead.id) !== id) return;
+    activityForm.setFieldsValue({ type: 'call', engagement_status: 'unknown' });
+    setActivityOpen(true);
+    const next = new URLSearchParams(searchParams);
+    next.delete('contact');
+    setSearchParams(next, { replace: true });
+  }, [id, lead?.id, searchParams]);
+
+  const openActivity = (type = 'call') => {
+    activityForm.setFieldsValue({ type, engagement_status: 'unknown' });
+    setActivityOpen(true);
+  };
+
   const courseOptions = courses.map((course) => ({ label: course.name, value: course.id }));
-  const recommendation = lead?.aiScore?.recommendation;
 
   const openEdit = () => {
     form.setFieldsValue({
-      status: lead.status,
       source: lead.lead_source,
       occupation: lead.occupation,
       study_purpose: lead.study_purpose,
@@ -186,10 +229,11 @@ export function LeadDetailPage() {
     try {
       setSaving(true);
       await leadService.update(String(lead.id), values);
-      message.success('Đã cập nhật lead. AI sẽ tự cập nhật lại điểm nếu feature thay đổi.');
+      message.success('Đã cập nhật thông tin lead');
       setEditOpen(false);
       fetchDetail();
-      setTimeout(fetchDetail, 2500);
+      fetchActivities();
+      queueRefresh();
     } catch (err) {
       console.error(err);
       message.error('Cập nhật lead thất bại');
@@ -200,25 +244,21 @@ export function LeadDetailPage() {
 
   const handleStatusChange = async (status: string) => {
     if (!lead) return;
-    await handleUpdate({
-      status,
-      source: lead.lead_source,
-      occupation: lead.occupation,
-      study_purpose: lead.study_purpose,
-      course_id: lead.course_id,
-      notes: lead.notes,
-    });
+    if (status === 'lost') { setLostOpen(true); return; }
+    if (status === 'enrolled') { handleConvert(); return; }
+    await handleUpdate({ status });
   };
 
   const handleScore = async () => {
     try {
       setSaving(true);
-      await leadService.score(Number(lead.id));
-      message.success('Đã chấm điểm AI cho lead');
+      const result = await leadService.score(Number(lead.id));
+      if (result.model_status === 'unavailable') message.warning(result.message);
+      else message.success(result.message || 'Đã cập nhật đánh giá lead');
       fetchDetail();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      message.error('Chấm điểm AI thất bại');
+      message.error(err.message || 'Chưa thể cập nhật đánh giá lead');
     } finally {
       setSaving(false);
     }
@@ -230,17 +270,22 @@ export function LeadDetailPage() {
       return;
     }
 
-    try {
-      setSaving(true);
-      await leadService.convert(Number(lead.id));
-      message.success('Đã convert lead thành học viên');
-      fetchDetail();
-    } catch (err) {
-      console.error(err);
-      message.error('Convert lead thất bại');
-    } finally {
-      setSaving(false);
-    }
+    Modal.confirm({
+      title: 'Chuyển thành học viên?',
+      content: `${lead.full_name} sẽ được tạo hồ sơ học viên theo quy trình đăng ký hiện tại.`,
+      okText: 'Xác nhận đăng ký', cancelText: 'Hủy',
+      onOk: async () => {
+        setSaving(true);
+        try {
+          await leadService.convert(Number(lead.id));
+          message.success('Đã chuyển thành học viên');
+          fetchDetail(); fetchActivities();
+        } catch (err: any) {
+          message.error(err.message || 'Chuyển học viên thất bại');
+          throw err;
+        } finally { setSaving(false); }
+      },
+    });
   };
 
   const handleClaimLead = async () => {
@@ -281,12 +326,14 @@ export function LeadDetailPage() {
   const handleCreateActivity = async (values: any) => {
     try {
       setSaving(true);
-      await leadService.createActivity(String(lead.id), values);
-      message.success('Đã thêm tương tác. AI đang cập nhật lại điểm lead.');
+      const isContact = ['call', 'email', 'sms', 'meeting'].includes(values.type);
+      await leadService.createActivity(String(lead.id), { ...values, engagement_status: isContact ? values.engagement_status || 'unknown' : undefined });
+      message.success(isContact ? 'Đã ghi nhận liên hệ. Điểm đánh giá sẽ cập nhật sau ít giây.' : 'Đã lưu ghi chú');
       activityForm.resetFields();
       setActivityOpen(false);
       fetchDetail();
-      setTimeout(fetchDetail, 2500);
+      fetchActivities();
+      queueRefresh();
     } catch (err) {
       console.error(err);
       message.error('Không thêm được tương tác');
@@ -311,97 +358,45 @@ export function LeadDetailPage() {
 
   const tabs = [
     {
-      key: 'overview',
-      label: 'Tổng quan',
-      children: (
-        <Card>
-          <Descriptions column={{ xs: 1, md: 2 }} bordered size="middle">
-            <Descriptions.Item label="Họ tên">{lead.full_name}</Descriptions.Item>
-            <Descriptions.Item label="Trạng thái">
-              <Tag color={statusColors[lead.status]}>{statusLabels[lead.status] || lead.status}</Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="Điện thoại">{lead.phone || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Email">{lead.email || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Nguồn">{sourceLabels[lead.lead_source] || lead.lead_source || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Người phụ trách">{lead.assignedUser?.full_name || 'Chưa phân công'}</Descriptions.Item>
-            <Descriptions.Item label="Nghề nghiệp">{occupationLabels[lead.occupation] || lead.occupation || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Mục tiêu học">{studyPurposeLabels[lead.study_purpose] || lead.study_purpose || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Khóa quan tâm">{lead.course?.name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Ngày tạo">{formatDate(lead.createdAt)}</Descriptions.Item>
-            <Descriptions.Item label="Liên hệ gần nhất">{formatDate(lead.last_contacted)}</Descriptions.Item>
-            <Descriptions.Item label="Chấm điểm lần cuối">{formatDate(lead.aiScore?.scored_at)}</Descriptions.Item>
-            <Descriptions.Item label="Ghi chú" span={2}>{lead.notes || '-'}</Descriptions.Item>
-          </Descriptions>
-
-          <div className="mt-5">
-            <div className="mb-2 flex items-center justify-between">
-              <Space>
-                <span className="font-semibold">AI lead score</span>
-                {recommendation && (
-                  <Tag color={recommendationColors[recommendation] || 'default'}>
-                    {recommendationLabels[recommendation] || recommendation}
-                  </Tag>
-                )}
-              </Space>
-              <Tag color={score >= 80 ? 'green' : score >= 60 ? 'orange' : 'red'}>{score}%</Tag>
-            </div>
-            <Progress percent={score} strokeColor={getScoreColor(score)} />
-          </div>
-        </Card>
-      ),
-    },
-    {
       key: 'timeline',
-      label: 'Timeline',
-      children: (
-        <Card>
-          {lead.activities?.length ? (
-            <Timeline
-              items={lead.activities.map((activity: any) => ({
-                children: (
-                  <div>
-                    <div className="font-medium">{activityLabels[activity.type] || activity.type}</div>
-                    {activity.content && <div className="text-gray-600">{activity.content}</div>}
-                    <div className="text-xs text-gray-500">
-                      {formatDate(activity.createdAt)}
-                      {activity.user?.full_name ? ` - ${activity.user.full_name}` : ''}
-                    </div>
-                  </div>
-                ),
-              }))}
-            />
-          ) : (
-            <Empty description="Chưa có tương tác" />
-          )}
-        </Card>
-      ),
+      label: 'Lịch sử chăm sóc' + (activityPagination.total ? ' (' + activityPagination.total + ')' : ''),
+      children: <Card>
+        {activitiesError ? <Alert type="error" showIcon message={activitiesError} action={<Button onClick={() => fetchActivities(activityPagination.current)}>Thử lại</Button>} /> :
+          <Spin spinning={activitiesLoading}>
+            {activities.length ? <Timeline items={activities.map((activity: any) => ({
+              key: activity.id,
+              color: activity.type === 'status_change' || activity.type === 'note' ? 'gray' : 'blue',
+              children: <div className="pb-2">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-gray-800">{activityLabels[activity.type] || activity.type}</span>
+                  {activity.engagement_status && <Tag color={activity.engagement_status === 'rejected' ? 'volcano' : 'blue'}>{engagementLabels[activity.engagement_status] || activity.engagement_status}</Tag>}
+                </div>
+                {activity.content && <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">{activity.content}</p>}
+                <div className="mt-1 text-xs text-gray-400">{formatDate(activity.createdAt)} · {activity.user?.full_name || 'Không rõ người ghi'}</div>
+              </div>,
+            }))} /> : <Empty description="Chưa có hoạt động được ghi nhận">
+              {!['enrolled', 'lost'].includes(lead.status) && <Button type="primary" onClick={() => openActivity()}>Ghi nhận liên hệ đầu tiên</Button>}
+            </Empty>}
+          </Spin>}
+        {activityPagination.total > activityPagination.pageSize && <Pagination size="small" current={activityPagination.current} total={activityPagination.total} pageSize={activityPagination.pageSize} showSizeChanger={false} onChange={page => fetchActivities(page)} />}
+      </Card>,
     },
     {
-      key: 'ai',
-      label: 'AI',
-      children: (
-        <Card>
-          <Descriptions column={1} bordered size="middle">
-            <Descriptions.Item label="Khuyến nghị">
-              {recommendation ? (
-                <Tag color={recommendationColors[recommendation] || 'default'}>
-                  {recommendationLabels[recommendation] || recommendation}
-                </Tag>
-              ) : 'Chưa có dữ liệu'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Chấm điểm lần cuối">{formatDate(lead.aiScore?.scored_at)}</Descriptions.Item>
-            <Descriptions.Item label="Dữ liệu AI đang dùng">
-              Nguồn: {sourceLabels[lead.lead_source] || lead.lead_source || '-'}; nghề nghiệp: {occupationLabels[lead.occupation] || '-'}; mục tiêu: {studyPurposeLabels[lead.study_purpose] || '-'}; khóa quan tâm: {lead.course?.name || '-'}.
-            </Descriptions.Item>
-            <Descriptions.Item label="Yếu tố tích cực">
-              {lead.aiScore?.positive_factors?.length ? lead.aiScore.positive_factors.join(', ') : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Yếu tố cần lưu ý">
-              {lead.aiScore?.negative_factors?.length ? lead.aiScore.negative_factors.join(', ') : '-'}
-            </Descriptions.Item>
-          </Descriptions>
-        </Card>
-      ),
+      key: 'overview',
+      label: 'Thông tin lead',
+      children: <Card><Descriptions column={{ xs: 1, md: 2 }} bordered size="small">
+        <Descriptions.Item label="Họ tên">{lead.full_name}</Descriptions.Item>
+        <Descriptions.Item label="Người phụ trách">{lead.assignedUser?.full_name || 'Chưa phân công'}</Descriptions.Item>
+        <Descriptions.Item label="Điện thoại">{lead.phone || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Email">{lead.email || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Nguồn">{getLeadSourceLabel(lead.lead_source, sourceOptions)}</Descriptions.Item>
+        <Descriptions.Item label="Khóa quan tâm">{lead.course?.name || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Nghề nghiệp">{occupationLabels[lead.occupation] || lead.occupation || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Mục tiêu học">{studyPurposeLabels[lead.study_purpose] || lead.study_purpose || '-'}</Descriptions.Item>
+        <Descriptions.Item label="Ngày tạo">{formatDate(lead.createdAt)}</Descriptions.Item>
+        <Descriptions.Item label="Liên hệ gần nhất">{formatDate(lead.last_contacted)}</Descriptions.Item>
+        <Descriptions.Item label="Ghi chú" span={2}><span className="whitespace-pre-wrap break-words">{lead.notes || '-'}</span></Descriptions.Item>
+      </Descriptions></Card>,
     },
   ];
 
@@ -417,46 +412,32 @@ export function LeadDetailPage() {
         ]}
         actions={
           <Space wrap>
-            <Button icon={<PhoneOutlined />}>Gọi điện</Button>
-            <Button icon={<MailOutlined />}>Email</Button>
-            <Button icon={<PlusOutlined />} onClick={() => setActivityOpen(true)}>Thêm tương tác</Button>
-            <Button icon={<RobotOutlined />} loading={saving} onClick={handleScore}>Chấm điểm AI</Button>
-            {user?.role === 'admin' && (
-              <Button
-                loading={saving}
-                onClick={() => {
-                  setAssignSaleId(lead.assignedUser?.id);
-                  setAssignOpen(true);
-                }}
-              >
-                Phân công
-              </Button>
-            )}
-            {user?.role === 'sale' && !lead.assignedUser && (
-              <Button loading={saving} onClick={handleClaimLead}>Phân công cho tôi</Button>
-            )}
-            <Button
-              type="primary"
-              icon={<UserAddOutlined />}
-              disabled={lead.status === 'enrolled' || !lead.email}
-              loading={saving}
-              onClick={handleConvert}
-            >
-              Convert học viên
-            </Button>
-            <Button icon={<EditOutlined />} onClick={openEdit}>Sửa</Button>
+            <Button icon={<PhoneOutlined />} href={lead.phone ? 'tel:' + lead.phone : undefined} disabled={!lead.phone}>Gọi điện</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openActivity()} disabled={['enrolled', 'lost'].includes(lead.status)}>Ghi nhận liên hệ</Button>
+            <Dropdown trigger={['click']} menu={{ items: [
+              { key: 'email', label: <a href={lead.email ? 'mailto:' + lead.email : undefined}>Soạn email</a>, disabled: !lead.email },
+              { key: 'note', label: 'Thêm ghi chú nội bộ', onClick: () => openActivity('note') },
+              { key: 'edit', label: 'Chỉnh sửa thông tin', onClick: openEdit },
+              ...(user?.role === 'admin' ? [{ key: 'assign', label: 'Phân công sale', onClick: () => { setAssignSaleId(lead.assignedUser?.id); setAssignOpen(true); } }] : []),
+              ...(user?.role === 'sale' && !lead.assignedUser ? [{ key: 'claim', label: 'Nhận phụ trách', onClick: handleClaimLead }] : []),
+              { key: 'convert', label: 'Chuyển thành học viên', disabled: ['enrolled', 'lost'].includes(lead.status) || !lead.email, onClick: handleConvert },
+              ...(!['enrolled', 'lost'].includes(lead.status) ? [{ key: 'lost', label: 'Đánh dấu thất bại', onClick: () => setLostOpen(true) }] : []),
+            ] }}><Button loading={saving}>Thao tác khác</Button></Dropdown>
           </Space>
         }
       />
 
       <div className="mb-4">
         <Space wrap>
-          <span className="text-gray-600">Cập nhật trạng thái nhanh:</span>
-          <Select value={lead.status} style={{ width: 180 }} options={statusOptions} loading={saving} onChange={handleStatusChange} />
+          <span className="text-gray-600">Giai đoạn:</span>
+          <Select value={lead.status} style={{ width: 180 }} options={statusOptions} disabled={lead.status === 'enrolled'} loading={saving} onChange={handleStatusChange} />
         </Space>
       </div>
 
-      <Tabs defaultActiveKey="overview" items={tabs} />
+      {lead.status !== 'lost' && <Steps className="mb-6" size="small" current={['new', 'contacted', 'interested', 'trial', 'enrolled'].indexOf(lead.status)} items={['Tiếp nhận', 'Liên hệ', 'Quan tâm', 'Học thử', 'Đăng ký'].map(title => ({ title }))} />}
+      <LeadConsultationPanel lead={lead} activities={latestActivities} onScore={handleScore} loading={saving} />
+      <Tabs defaultActiveKey="timeline" items={tabs} />
+      <MarkLostModal open={lostOpen} lead={lead} onCancel={() => setLostOpen(false)} onSuccess={() => { setLostOpen(false); fetchDetail(); fetchActivities(); }} />
 
       <Modal
         title="Phân công lead"
@@ -489,11 +470,8 @@ export function LeadDetailPage() {
 
       <Drawer title="Chỉnh sửa lead" width={520} open={editOpen} onClose={() => setEditOpen(false)} destroyOnClose>
         <Form form={form} layout="vertical" onFinish={handleUpdate}>
-          <Form.Item name="status" label="Trạng thái" rules={[{ required: true }]}>
-            <Select options={statusOptions} />
-          </Form.Item>
           <Form.Item name="source" label="Nguồn lead" rules={[{ required: true }]}>
-            <Select options={sourceOptions} />
+            <Select options={getEditableLeadSources(sourceOptions, lead.lead_source)} />
           </Form.Item>
           <Form.Item name="occupation" label="Nghề nghiệp" rules={[{ required: true }]}>
             <Select options={occupationOptions} />
@@ -514,18 +492,19 @@ export function LeadDetailPage() {
         </Form>
       </Drawer>
 
-      <Drawer title="Thêm tương tác" width={520} open={activityOpen} onClose={() => setActivityOpen(false)} destroyOnClose>
+      <Drawer title="Ghi nhận chăm sóc" width={520} styles={{ wrapper: { maxWidth: '100vw' } }} open={activityOpen} onClose={() => setActivityOpen(false)} destroyOnClose>
         <Form form={activityForm} layout="vertical" onFinish={handleCreateActivity}>
           <Form.Item name="type" label="Loại tương tác" rules={[{ required: true }]}>
-            <Select options={Object.entries(activityLabels).map(([value, label]) => ({ value, label }))} />
+            <Select options={Object.entries(activityLabels).filter(([value]) => value !== 'status_change').map(([value, label]) => ({ value, label }))} />
           </Form.Item>
-          <Form.Item name="content" label="Nội dung" rules={[{ required: true }]}>
-            <Input.TextArea rows={4} />
+          <Form.Item name="content" label="Nội dung và bước tiếp theo" rules={[{ required: true }]}>
+            <Input.TextArea rows={4} placeholder="Nhu cầu của khách, điều còn phân vân và lịch liên hệ đã thống nhất..." />
           </Form.Item>
-          <Form.Item name="engagement_status" label="Mức độ quan tâm">
+          {activityType !== 'note' && <Form.Item name="engagement_status" label="Kết quả liên hệ">
             <Select
               allowClear
               options={[
+                { label: 'Chưa có phản hồi', value: 'unknown' },
                 { label: 'Tương tác tích cực', value: 'positive_interaction' },
                 { label: 'Quan tâm nhưng cần thêm thời gian', value: 'interested_need_time' },
                 { label: 'Bận, hẹn gọi lại', value: 'busy_call_back' },
@@ -534,7 +513,7 @@ export function LeadDetailPage() {
                 { label: 'Từ chối', value: 'rejected' },
               ]}
             />
-          </Form.Item>
+          </Form.Item>}
           <Space>
             <Button type="primary" htmlType="submit" loading={saving}>Lưu</Button>
             <Button onClick={() => setActivityOpen(false)}>Hủy</Button>

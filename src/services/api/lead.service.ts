@@ -1,5 +1,11 @@
 import { getApiConfig } from './apiConfig';
 
+export interface LeadSourceOption {
+  value: string;
+  label: string;
+  legacy: boolean;
+}
+
 const config = getApiConfig();
 
 const getAuthHeader = () => {
@@ -35,6 +41,8 @@ const request = async (endpoint: string, options?: RequestInit) => {
 };
 
 export const leadService = {
+  getSources: async (): Promise<{ success: boolean; data: LeadSourceOption[] }> => request('/leads/sources'),
+
   getAll: async (params?: Record<string, unknown>) => {
     const query = buildQuery(params);
     return request(`/leads${query ? `?${query}` : ''}`);
@@ -47,7 +55,10 @@ export const leadService = {
 
   getById: async (id: string) => request(`/leads/${id}`),
 
-  getActivities: async (id: string) => request(`/leads/${id}/activities`),
+  getActivities: async (id: string, params?: Record<string, unknown>) => {
+    const query = buildQuery(params);
+    return request(`/leads/${id}/activities${query ? `?${query}` : ''}`);
+  },
 
   createActivity: async (id: string, data: any) =>
     request(`/leads/${id}/activities`, {

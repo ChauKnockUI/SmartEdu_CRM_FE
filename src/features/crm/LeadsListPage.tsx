@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
   DatePicker,
+  Dropdown,
   Drawer,
   Form,
   Input,
   Modal,
+  Pagination,
   Select,
   Space,
+  Switch,
   Table,
   Tabs,
   Tag,
@@ -17,15 +20,11 @@ import {
   message,
 } from 'antd';
 import {
-  AppstoreOutlined,
-  DeleteOutlined,
   DownloadOutlined,
+  EllipsisOutlined,
   InboxOutlined,
-  LineChartOutlined,
   PlusOutlined,
   ReloadOutlined,
-  TableOutlined,
-  UserAddOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
@@ -33,12 +32,17 @@ import dayjs from 'dayjs';
 import { useNavigate } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useAuth } from '@/shared/contexts/AuthContext';
-import { leadService } from '@/services/api/lead.service';
+import { leadService, type LeadSourceOption } from '@/services/api/lead.service';
 import { courseService } from '@/services/api/course.service';
 import { userService } from '@/services/api/user.service';
 import { LeadPipelineBoard } from './components/LeadPipelineBoard';
 import { LeadFunnelAnalytics } from './components/LeadFunnelAnalytics';
 import { MarkLostModal } from './components/MarkLostModal';
+import { getLeadScore } from './leadScore';
+import { LeadCareSummary } from './components/LeadCareSummary';
+import { getLeadSourceLabel } from './leadSources';
+import { getLeadGuidance } from './leadGuidance';
+import { LeadOverviewStats } from './components/LeadOverviewStats';
 
 const { RangePicker } = DatePicker;
 
@@ -60,15 +64,6 @@ const statusLabels: Record<string, string> = {
   lost: 'Thất bại',
 };
 
-const sourceOptions = [
-  { label: 'Facebook Ads', value: 'facebook' },
-  { label: 'Google Ads', value: 'google_ads' },
-  { label: 'Website Organic', value: 'website_organic' },
-  { label: 'TikTok', value: 'tiktok' },
-  { label: 'Giới thiệu', value: 'referral' },
-  { label: 'Khác', value: 'other' },
-];
-
 const occupationOptions = [
   { label: 'Sinh viên năm 1-2', value: 'student_y1_y2' },
   { label: 'Sinh viên năm 3-4', value: 'student_y3_y4' },
@@ -80,23 +75,6 @@ const studyPurposeOptions = [
   { label: 'Thi chứng chỉ', value: 'pass_exam' },
   { label: 'Thăng tiến công việc', value: 'career_advancement' },
 ];
-
-const recommendationLabels: Record<string, string> = {
-  HOT_LEAD: 'Lead nóng',
-  WARM_LEAD: 'Lead tiềm năng',
-  COLD_LEAD: 'Lead lạnh',
-};
-
-const recommendationColors: Record<string, string> = {
-  HOT_LEAD: 'green',
-  WARM_LEAD: 'gold',
-  COLD_LEAD: 'default',
-};
-
-function getLeadScore(lead: any) {
-  const rawScore = Number(lead.aiScore?.probability_score || 0);
-  return rawScore <= 1 ? Math.round(rawScore * 100) : Math.round(rawScore);
-}
 
 function parseCsvLine(line: string) {
   const result: string[] = [];
@@ -144,42 +122,62 @@ export function LeadsListPage() {
   const [importVisible, setImportVisible] = useState(false);
   const [form] = Form.useForm();
   const [leads, setLeads] = useState<any[]>([]);
+  const [sourceOptions, setSourceOptions] = useState<LeadSourceOption[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [assignLead, setAssignLead] = useState<any>(null);
   const [assignSaleId, setAssignSaleId] = useState<number>();
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [overview, setOverview] = useState<any>(null);
+  const listRequest = useRef(0);
   const [importing, setImporting] = useState(false);
   const [filters, setFilters] = useState<any>({});
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
+  const [searchDraft, setSearchDraft] = useState('');
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 50, total: 0 });
   const [viewMode, setViewMode] = useState<'pipeline' | 'table' | 'funnel'>('pipeline');
   const [lostTargetLead, setLostTargetLead] = useState<any | null>(null);
+  const latestView = useRef({ filters, pagination });
+  latestView.current = { filters, pagination };
 
   const fetchLeads = async (page = pagination.current, pageSize = pagination.pageSize, nextFilters = filters) => {
+    const requestId = ++listRequest.current;
     try {
       setLoading(true);
-      const res = await leadService.getAll({
+      const params = {
         page,
         limit: pageSize,
         status: nextFilters.status,
         source: nextFilters.source,
+        course_id: nextFilters.course_id,
+        assigned_to: nextFilters.assigned_to,
+        needs_care: nextFilters.needs_care || undefined,
         search: nextFilters.search,
-        date_from: nextFilters.dateRange?.[0]?.toISOString(),
-        date_to: nextFilters.dateRange?.[1]?.toISOString(),
-        sort_by: user?.role === 'sale' ? 'probability_score' : 'createdAt',
+        date_from: nextFilters.dateRange?.[0]?.startOf('day').toISOString(),
+        date_to: nextFilters.dateRange?.[1]?.endOf('day').toISOString(),
+        sort_by: 'createdAt',
         sort_dir: 'desc',
-      });
+      };
+      const [res, report] = await Promise.all([leadService.getAll(params), leadService.getFunnel(params)]);
+      if (requestId !== listRequest.current) return;
       setLeads(res.data || []);
+      setOverview(report.data);
+      setLoadError('');
       setPagination({
         current: res.pagination?.page || page,
         pageSize: res.pagination?.limit || pageSize,
         total: res.pagination?.total || 0,
       });
     } catch (err: any) {
-      message.error(err.message || 'Không tải được danh sách lead');
+      if (requestId === listRequest.current) setLoadError(err.message || 'Không tải được danh sách lead');
     } finally {
-      setLoading(false);
+      if (requestId === listRequest.current) setLoading(false);
     }
+  };
+
+  const refreshList = (resetPage = false) => {
+    const current = latestView.current;
+    return fetchLeads(resetPage ? 1 : current.pagination.current, current.pagination.pageSize, current.filters);
   };
 
   const fetchCourses = async () => {
@@ -188,6 +186,15 @@ export function LeadsListPage() {
       setCourses(res.data || []);
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const fetchSources = async () => {
+    try {
+      const res = await leadService.getSources();
+      setSourceOptions(res.data);
+    } catch (err: any) {
+      message.error(err.message || 'Không tải được danh mục nguồn lead');
     }
   };
 
@@ -205,15 +212,15 @@ export function LeadsListPage() {
   const handleViewModeChange = (mode: 'pipeline' | 'table' | 'funnel') => {
     setViewMode(mode);
     if (mode === 'pipeline') {
-      fetchLeads(1, 200);
+      fetchLeads(1, 50);
     } else if (mode === 'table') {
       fetchLeads(1, 10);
     }
   };
 
   useEffect(() => {
-    // Pipeline view load full leads để hiển thị đầy đủ các cột phễu
-    fetchLeads(1, 200);
+    fetchLeads(1, 50);
+    fetchSources();
     fetchCourses();
     fetchSales();
   }, [user?.role]);
@@ -238,7 +245,7 @@ export function LeadsListPage() {
       fetchLeads(1);
 
       if (created?.data?.id) {
-        setTimeout(() => fetchLeads(1), 2500);
+        setTimeout(() => refreshList(true), 2500);
       }
     } catch (err: any) {
       message.error(err.message || 'Tạo lead thất bại');
@@ -346,7 +353,7 @@ export function LeadsListPage() {
       message.success(`Import xong: ${success} lead thành công${failed ? `, ${failed} dòng lỗi` : ''}`);
       setImportVisible(false);
       fetchLeads(1);
-      setTimeout(() => fetchLeads(1), 3000);
+      setTimeout(() => refreshList(true), 3000);
     } catch (err: any) {
       message.error(err.message || 'Không đọc được file CSV');
     } finally {
@@ -381,11 +388,10 @@ export function LeadsListPage() {
       ),
     },
     { title: 'Điện thoại', dataIndex: 'phone' },
-    { title: 'Email', dataIndex: 'email', render: (value) => value || '-' },
     {
       title: 'Nguồn',
       dataIndex: 'lead_source',
-      render: (value) => sourceOptions.find((item) => item.value === value)?.label || value || '-',
+      render: (value) => getLeadSourceLabel(value, sourceOptions),
     },
     {
       title: 'Trạng thái',
@@ -393,27 +399,13 @@ export function LeadsListPage() {
       render: (status: string) => <Tag color={statusColors[status] || 'default'}>{statusLabels[status] || status}</Tag>,
     },
     {
-      title: 'AI score',
-      sorter: (a, b) => getLeadScore(a) - getLeadScore(b),
+      title: 'Điểm tham khảo',
+      sorter: (a, b) => (getLeadScore(a) ?? -1) - (getLeadScore(b) ?? -1),
       render: (_, record) => {
-        const score = getLeadScore(record);
-        const recommendation = record.aiScore?.recommendation;
-        return (
-          <Space direction="vertical" size={2}>
-            <Tag color={score >= 80 ? 'green' : score >= 60 ? 'orange' : 'red'}>{score}%</Tag>
-            {recommendation && (
-              <Tag color={recommendationColors[recommendation] || 'default'}>
-                {recommendationLabels[recommendation] || recommendation}
-              </Tag>
-            )}
-          </Space>
-        );
+        return <LeadCareSummary lead={record} compact />;
       },
     },
-    {
-      title: 'Chấm lúc',
-      render: (_, record) => record.aiScore?.scored_at ? dayjs(record.aiScore.scored_at).format('DD/MM HH:mm') : 'Đang chờ',
-    },
+    { title: 'Việc tiếp theo', width: 220, render: (_, record) => <span className="text-sm text-gray-600">{getLeadGuidance(record).title}</span> },
     { title: 'Phụ trách', render: (_, record) => record.assignedUser?.full_name || 'Chưa phân công' },
     {
       title: 'Liên hệ gần nhất',
@@ -421,72 +413,58 @@ export function LeadsListPage() {
     },
     {
       title: 'Hành động',
-      width: 190,
+      width: 130,
       render: (_, record) => (
         <Space size="small">
           <Button type="link" onClick={() => navigate(`/crm/leads/${record.id}`)}>Chi tiết</Button>
-          {user?.role === 'admin' && (
-            <Button type="link" onClick={() => openAssignModal(record)}>Phân công</Button>
-          )}
-          {user?.role === 'sale' && !record.assignedUser && (
-            <Button type="link" onClick={() => handleClaimLead(record)}>Phân công cho tôi</Button>
-          )}
-          <Tooltip title={!record.email ? 'Cần email để tạo tài khoản học viên' : ''}>
-            <Button
-              type="link"
-              icon={<UserAddOutlined />}
-              disabled={record.status === 'enrolled' || !record.email}
-              onClick={() => handleConvert(record)}
-            >
-              Convert
-            </Button>
-          </Tooltip>
-          {record.status !== 'lost' && record.status !== 'enrolled' && (
-            <Button danger type="link" onClick={() => setLostTargetLead(record)}>
-              Lost
-            </Button>
-          )}
-          {user?.role === 'admin' && (
-            <Button danger type="text" icon={<DeleteOutlined />} onClick={() => handleDelete(record.id)} />
-          )}
+          <Dropdown menu={{ items: [
+            ...(!['enrolled', 'lost'].includes(record.status) ? [{ key: 'contact', label: 'Ghi nhận liên hệ', onClick: () => navigate(`/crm/leads/${record.id}?contact=1`) }] : []),
+            ...(user?.role === 'admin' ? [{ key: 'assign', label: 'Phân công sale', onClick: () => openAssignModal(record) }] : []),
+            ...(user?.role === 'sale' && !record.assignedUser ? [{ key: 'claim', label: 'Nhận phụ trách', onClick: () => handleClaimLead(record) }] : []),
+            { key: 'convert', label: 'Chuyển thành học viên', disabled: ['enrolled', 'lost'].includes(record.status) || !record.email, onClick: () => handleConvert(record) },
+            ...(!['enrolled', 'lost'].includes(record.status) ? [{ key: 'lost', label: 'Đánh dấu thất bại', onClick: () => setLostTargetLead(record) }] : []),
+            ...(user?.role === 'admin' ? [{ key: 'delete', label: 'Xóa lead', danger: true, onClick: () => handleDelete(record.id) }] : []),
+          ] }} trigger={['click']}><Button aria-label={`Thao tác với ${record.full_name}`} type="text" icon={<EllipsisOutlined />} /></Dropdown>
         </Space>
       ),
     },
-  ], [navigate, user?.role, pagination.current]);
+  ], [navigate, user?.role, pagination.current, sourceOptions]);
 
-  const tableData = filters.status === 'enrolled'
-    ? leads.filter((lead) => lead.status === 'enrolled')
-    : filters.status
-      ? leads
-      : leads.filter((lead) => lead.status !== 'enrolled');
+  const tableData = leads;
+  const listFilters = <div className="mb-4 flex flex-wrap items-center gap-3">
+    <Input.Search aria-label="Tìm lead" placeholder="Tên, số điện thoại, email" allowClear style={{ width: 230 }} value={searchDraft} onChange={event => setSearchDraft(event.target.value)} onSearch={search => handleFilterChange({ search })} />
+    <Select aria-label="Lọc giai đoạn" placeholder="Tất cả giai đoạn" allowClear style={{ width: 160 }} value={filters.status} options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))} onChange={status => handleFilterChange({ status })} />
+    <Select aria-label="Lọc nguồn lead" placeholder="Tất cả nguồn" allowClear style={{ width: 160 }} value={filters.source} options={sourceOptions} onChange={source => handleFilterChange({ source })} />
+    <Select aria-label="Lọc khóa học" placeholder="Tất cả khóa học" allowClear style={{ width: 175 }} value={filters.course_id} options={courseOptions} onChange={course_id => handleFilterChange({ course_id })} />
+    {user?.role === 'admin' && <Select aria-label="Lọc sale phụ trách" placeholder="Tất cả sale" allowClear style={{ width: 165 }} value={filters.assigned_to} options={sales.map(sale => ({ label: sale.full_name, value: sale.id }))} onChange={assigned_to => handleFilterChange({ assigned_to })} />}
+    <Space size={6}><Switch size="small" aria-label="Chỉ lead cần chăm sóc" checked={Boolean(filters.needs_care)} onChange={needs_care => handleFilterChange({ needs_care })} /><Tooltip title="Lead chưa liên hệ hoặc đã quá 3 ngày chưa liên hệ lại; chỉ tính lead đang chăm sóc."><span className="text-xs text-gray-600">Cần chăm sóc (&gt;3 ngày)</span></Tooltip></Space>
+    {viewMode === 'pipeline' && filters.dateRange && <Tag closable onClose={() => handleFilterChange({ dateRange: undefined })}>Đang lọc ngày tạo</Tag>}
+    {Object.values(filters).some(Boolean) && <Button type="link" size="small" onClick={() => { setFilters({}); setSearchDraft(''); fetchLeads(1, pagination.pageSize, {}); }}>Xóa bộ lọc</Button>}
+  </div>;
 
   return (
     <div>
       <PageHeader
-        title={user?.role === 'sale' ? 'Khách hàng của tôi' : 'Quản lý lead & Phễu bán hàng'}
-        subtitle={user?.role === 'sale' ? 'Danh sách khách hàng bạn trực tiếp phụ trách và chăm sóc' : 'Quản lý toàn bộ khách hàng tiềm năng của trung tâm'}
+        title={user?.role === 'sale' ? 'Khách hàng của tôi' : 'Quản lý lead'}
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'CRM' },
-          { title: user?.role === 'sale' ? 'My Leads' : 'Leads & Funnel' },
+          { title: user?.role === 'sale' ? 'Khách hàng của tôi' : 'Quản lý lead' },
         ]}
         actions={
           <Space wrap>
-            <Button icon={<ReloadOutlined />} onClick={() => fetchLeads()}>Tải lại</Button>
+            {viewMode !== 'funnel' && <Button icon={<ReloadOutlined />} onClick={() => fetchLeads()}>Tải lại</Button>}
             <Button icon={<InboxOutlined />} onClick={() => setImportVisible(true)}>Import CSV</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setDrawerVisible(true)}>Thêm lead</Button>
           </Space>
         }
       />
 
-      {user?.role === 'sale' && (
-        <Alert
-          type="info"
-          showIcon
-          className="mb-4"
-          message="Danh sách khách hàng bạn trực tiếp phụ trách, được sắp xếp ưu tiên theo điểm AI Score cao nhất."
-        />
-      )}
+      {viewMode !== 'funnel' && <div className="mb-4 space-y-2">
+        {loadError && <Alert type="error" showIcon message={loadError} description="Chưa tải được dữ liệu mới. Bạn có thể thử tải lại." />}
+        <LeadOverviewStats data={overview} loading={loading} manager={user?.role === 'admin'} />
+        <div className="text-xs text-gray-500">Tổng quan theo bộ lọc hiện tại · {overview?.summary?.totalLeads ?? '—'} lead</div>
+      </div>}
 
       <div className="rounded-lg bg-white p-4 shadow-sm">
         <Tabs
@@ -495,58 +473,27 @@ export function LeadsListPage() {
           items={[
             {
               key: 'pipeline',
-              label: (
-                <span>
-                  <AppstoreOutlined /> Phễu bán hàng
-                </span>
-              ),
-              children: (
+              label: 'Phễu bán hàng',
+              children: (<div>
+                {listFilters}
                 <LeadPipelineBoard
                   leads={leads}
+                  sourceOptions={sourceOptions}
                   loading={loading}
-                  courses={courses}
-                  sales={sales}
-                  currentUserId={user?.id ? Number(user.id) : undefined}
-                  userRole={user?.role}
-                  onRefresh={() => fetchLeads(1, 200)}
+                  onRefresh={() => fetchLeads()}
                   onConvert={handleConvert}
-                  onOpenCreate={() => setDrawerVisible(true)}
                 />
-              ),
+                <Pagination className="mt-4" current={pagination.current} pageSize={pagination.pageSize} total={pagination.total} showSizeChanger pageSizeOptions={[25, 50, 100]} showTotal={total => `${total} lead · thẻ hiển thị theo trang`} onChange={(page, size) => fetchLeads(page, size)} />
+              </div>),
             },
             {
               key: 'table',
-              label: (
-                <span>
-                  <TableOutlined /> Danh sách chi tiết
-                </span>
-              ),
+              label: 'Danh sách chi tiết',
               children: (
                 <div>
+                  {listFilters}
                   <Space className="mb-4 w-full" size={12} wrap>
-                    <Select
-                      placeholder="Trạng thái"
-                      style={{ width: 180 }}
-                      allowClear
-                      value={filters.status}
-                      onChange={(status) => handleFilterChange({ status })}
-                      options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))}
-                    />
-                    <Select
-                      placeholder="Nguồn"
-                      style={{ width: 180 }}
-                      allowClear
-                      value={filters.source}
-                      onChange={(source) => handleFilterChange({ source })}
-                      options={sourceOptions}
-                    />
-                    <RangePicker value={filters.dateRange} onChange={(dateRange) => handleFilterChange({ dateRange })} />
-                    <Input.Search
-                      allowClear
-                      placeholder="Tìm theo tên, SĐT, email"
-                      style={{ width: 260 }}
-                      onSearch={(search) => handleFilterChange({ search })}
-                    />
+                    <RangePicker aria-label="Lọc ngày tạo" placeholder={['Tạo từ ngày', 'Đến ngày']} value={filters.dateRange} onChange={(dateRange) => handleFilterChange({ dateRange })} />
                   </Space>
 
                   <Table
@@ -570,13 +517,10 @@ export function LeadsListPage() {
             },
             {
               key: 'funnel',
-              label: (
-                <span>
-                  <LineChartOutlined /> Báo cáo chuyển đổi
-                </span>
-              ),
+              label: 'Báo cáo chuyển đổi',
               children: (
                 <LeadFunnelAnalytics
+                  sourceOptions={sourceOptions}
                   courses={courses}
                   sales={sales}
                   userRole={user?.role}
@@ -599,7 +543,7 @@ export function LeadsListPage() {
             <Input placeholder="email@gmail.com" />
           </Form.Item>
           <Form.Item name="source" label="Nguồn lead" rules={[{ required: true, message: 'Chọn nguồn lead' }]}>
-            <Select options={sourceOptions} placeholder="Chọn nguồn" />
+            <Select options={sourceOptions.filter(source => !source.legacy)} placeholder="Chọn nguồn" />
           </Form.Item>
           <Form.Item name="occupation" label="Nghề nghiệp" rules={[{ required: true, message: 'Chọn nghề nghiệp' }]}>
             <Select options={occupationOptions} placeholder="Chọn nghề nghiệp" />
@@ -656,7 +600,7 @@ export function LeadsListPage() {
           showIcon
           className="mb-4"
           message="CSV cần các cột: full_name, phone, email, source, occupation, study_purpose, course_id."
-          description="Các giá trị dropdown phải dùng mã hệ thống, ví dụ occupation=working_professional, study_purpose=career."
+          description={`Nguồn lead dùng đúng mã lưu trong DB: ${sourceOptions.filter(source => !source.legacy).map(source => source.value).join(', ')}. Ví dụ occupation=working_professional, study_purpose=career_advancement.`}
         />
         <Space className="mb-4">
           <Button icon={<DownloadOutlined />} onClick={downloadTemplate}>Tải file mẫu</Button>
