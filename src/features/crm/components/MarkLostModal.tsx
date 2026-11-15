@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Form, Input, Modal, Select, Space, message } from 'antd';
+import { Form, Input, Modal, Select, message } from 'antd';
 import { leadService } from '@/services/api/lead.service';
 
 interface MarkLostModalProps {
@@ -36,7 +36,7 @@ export function MarkLostModal({ open, lead, onCancel, onSuccess }: MarkLostModal
         notes: values.notes,
       });
 
-      message.success(`Đã chuyển lead "${lead.full_name}" sang trạng thái Thất bại (Lost)`);
+      message.success(`Đã ghi nhận lý do và đánh dấu lead "${lead.full_name}" thất bại`);
       form.resetFields();
       onSuccess();
     } catch (err: any) {
@@ -48,20 +48,20 @@ export function MarkLostModal({ open, lead, onCancel, onSuccess }: MarkLostModal
 
   return (
     <Modal
-      title="Đánh dấu Lead thất bại (Lost)"
+      title="Kết thúc theo đuổi lead"
       open={open}
       onCancel={() => {
         form.resetFields();
         onCancel();
       }}
-      okText="Xác nhận Lost"
+      okText="Đánh dấu thất bại"
       okButtonProps={{ danger: true, loading: submitting }}
       cancelText="Hủy"
       onOk={() => form.submit()}
       destroyOnClose
     >
       <div className="mb-4 text-sm text-gray-500">
-        Thu thập lý do mất lead giúp hệ thống phân tích điểm nghẽn phễu bán hàng và tối ưu chiến lược tuyển sinh.
+        Chỉ kết thúc khi đã có căn cứ thực tế. Điểm AI thấp chưa đủ để bỏ lead; hãy ghi rõ lý do và phản hồi của khách.
       </div>
 
       <Form form={form} layout="vertical" onFinish={handleSubmit}>

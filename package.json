@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite"
+    "dev": "vite",
+    "test:crm": "node --test tests/crm.test.mjs"
   },
   "dependencies": {
     "@ant-design/colors": "^8.0.1",
