@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Form, Input, Modal, Select, message } from 'antd';
 import { leadService } from '@/services/api/lead.service';
+import { LEAD_ACTIONS } from '../leadStatus';
 
 interface MarkLostModalProps {
   open: boolean;
@@ -23,7 +24,7 @@ export function MarkLostModal({ open, lead, onCancel, onSuccess }: MarkLostModal
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (values: any) => {
-    if (!lead?.id) return;
+    if (!lead?.id || submitting) return;
     try {
       setSubmitting(true);
       const lostReason = values.reason === 'Khác' && values.customReason
@@ -48,20 +49,20 @@ export function MarkLostModal({ open, lead, onCancel, onSuccess }: MarkLostModal
 
   return (
     <Modal
-      title="Kết thúc theo đuổi lead"
+      title={LEAD_ACTIONS.lost}
       open={open}
       onCancel={() => {
         form.resetFields();
         onCancel();
       }}
-      okText="Đánh dấu thất bại"
+      okText={LEAD_ACTIONS.lost}
       okButtonProps={{ danger: true, loading: submitting }}
       cancelText="Hủy"
       onOk={() => form.submit()}
       destroyOnClose
     >
       <div className="mb-4 text-sm text-gray-500">
-        Chỉ kết thúc khi đã có căn cứ thực tế. Điểm AI thấp chưa đủ để bỏ lead; hãy ghi rõ lý do và phản hồi của khách.
+        Ghi rõ lý do và phản hồi của khách trước khi kết thúc chăm sóc Lead.
       </div>
 
       <Form form={form} layout="vertical" onFinish={handleSubmit}>

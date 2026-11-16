@@ -30,11 +30,23 @@ const request = async (endpoint: string, options?: RequestInit) => {
   });
 
   const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Request failed');
+  if (!res.ok) throw Object.assign(new Error(json.message || 'Request failed'), { status: res.status });
   return json;
 };
 
+async function readAllPages(fetchPage: (page: number) => Promise<any>) {
+  const first = await fetchPage(1);
+  let data = first.data || [];
+  const pages = Math.ceil((first.pagination?.total || 0) / (first.pagination?.limit || 100));
+  for (let page = 2; page <= pages; page++) {
+    const next = await fetchPage(page);
+    data = data.concat(next.data || []);
+  }
+  return { ...first, data };
+}
+
 export const financeService = {
+  getAllInvoices: (params?: Record<string, unknown>) => readAllPages(page => financeService.getInvoices({ ...params, page, limit: 100 })),
   getInvoices: (params?: Record<string, unknown>) => {
     const query = buildQuery(params);
     return request(`/invoices${query ? `?${query}` : ''}`);
@@ -72,7 +84,7 @@ export const financeService = {
       body: JSON.stringify({ notes }),
     }),
 
-  getStudentInvoices: (studentId: number) => request(`/students/${studentId}/invoices`),
+  getStudentInvoices: (studentId: number, signal?: AbortSignal) => readAllPages(page => request(`/students/${studentId}/invoices?page=${page}&limit=100`, { signal })),
 
   getDebts: () => request('/finance/debts'),
 

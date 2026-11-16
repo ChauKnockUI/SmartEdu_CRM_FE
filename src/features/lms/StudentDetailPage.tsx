@@ -16,6 +16,7 @@ import {
   Row,
   Col,
   Statistic,
+  Alert,
 } from 'antd';
 import {
   EditOutlined,
@@ -24,6 +25,7 @@ import {
   TeamOutlined,
   MailOutlined,
   PhoneOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { useParams, useSearchParams } from 'react-router';
 import { RiskEstimate, RiskDetailsDrawer } from '../../shared/components/DropoutRisk';
@@ -34,22 +36,13 @@ import { PageHeader } from '../../shared/components/PageHeader';
 import { studentService } from '@/services/api/student.service';
 import { financeService } from '@/services/api/finance.service';
 import dayjs from 'dayjs';
+import { LeadEnrollmentModal } from '../crm/components/LeadEnrollmentModal';
+import { getStudentPermissions } from './studentPermissions';
+import { BillingStatusTag, billingDate, invoiceCollectionLink } from '../finance/billingStatus';
+import { studentStatusColors as STATUS_COLORS, studentStatusLabels as STATUS_LABELS } from './studentFilters';
+import { getClassStatus } from './classFilters';
 
 type Student = any;
-
-const STATUS_COLORS: Record<string, string> = {
-  active: 'green',
-  inactive: 'default',
-  graduated: 'blue',
-  dropped: 'red',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  active: 'Đang học',
-  inactive: 'Tạm ngưng',
-  graduated: 'Đã tốt nghiệp',
-  dropped: 'Nghỉ học',
-};
 
 const DAY_MAP: Record<string, string> = {
   Sun: 'CN',
@@ -88,78 +81,150 @@ const formatSchedule = (days?: string | number[], time?: string | string[]) => {
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
 
+export function StudentProfileError({ error, own, onRetry }: { error: any; own: boolean; onRetry: () => void }) {
+  const title = error.status === 404 ? own ? 'Chưa có hồ sơ học viên liên kết' : 'Không tìm thấy hồ sơ trong phạm vi được xem'
+    : error.status === 403 ? 'Không có quyền xem hồ sơ' : error.status === 401 ? 'Phiên đăng nhập không hợp lệ' : 'Không tải được hồ sơ học viên';
+  return <Alert type="error" showIcon message={title} description={error.message}
+    action={<Button onClick={onRetry}>Thử lại</Button>} />;
+}
+
 export function StudentDetailPage() {
   const { id } = useParams();
-  const currentStudentId = useRef(id);
-  currentStudentId.current = id;
   const { classId: contextClassId, openDetail, navigationState } = useDetailNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const { manageProfile: canManageStudent, viewFinance, evaluateRisk } = getStudentPermissions(user?.role);
+  const isStudent = user?.role === 'student';
+  const isOwnProfile = isStudent && !id;
+  const canViewLead = user?.role === 'admin' || user?.role === 'sale';
+  const scope = `${user?.id}:${user?.role}:${id || 'me'}`;
+  const currentScope = useRef(scope); currentScope.current = scope;
+  const profileRequest = useRef(0), invoiceRequest = useRef(0), riskRequest = useRef(0), scoreRequest = useRef(0);
+  const profileAbort = useRef<AbortController | null>(null);
+  const invoiceAbort = useRef<AbortController | null>(null);
+  const riskAbort = useRef<AbortController | null>(null);
+  const [enrollOpen, setEnrollOpen] = useState(false);
   const canReview = ['admin', 'sale', 'teacher'].includes(user?.role || '');
   const [classRisks, setClassRisks] = useState<Record<number, DropoutRiskView>>({});
   const [riskFetching, setRiskFetching] = useState(false);
-  const [riskError, setRiskError] = useState(false);
-  const selectedClassId = Number(searchParams.get('risk_class')) || null;
+  const [riskError, setRiskError] = useState('');
+  const selectedClassId = canReview ? Number(searchParams.get('risk_class')) || null : null;
   const requestedTab = searchParams.get('tab');
-  const activeTab = requestedTab && ['overview', 'classes', 'schedule', 'finance'].includes(requestedTab)
+  const activeTab = requestedTab && ['overview', 'classes', 'schedule', ...(viewFinance ? ['finance'] : [])].includes(requestedTab)
     ? requestedTab : contextClassId || selectedClassId ? 'classes' : 'overview';
 
-  const [student, setStudent] = useState<Student | null>(null);
+  const [profile, setProfile] = useState<Student | null>(null);
+  const [profileScope, setProfileScope] = useState('');
+  const student = profileScope === scope ? profile : null;
+  const latestStudentId = useRef<number | undefined>(student?.id); latestStudentId.current = student?.id;
+  const [profileError, setProfileError] = useState<any>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [invoiceOwner, setInvoiceOwner] = useState('');
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [invoiceError, setInvoiceError] = useState('');
   const [loading, setLoading] = useState(true);
   const [riskLoading, setRiskLoading] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [newPassword, setNewPassword] = useState('');
+  const [saving, setSaving] = useState(false);
+  const mutationBusy = useRef(false);
 
   const [form] = Form.useForm();
 
   const fetchStudent = async () => {
+    profileAbort.current?.abort();
+    const controller = new AbortController(); profileAbort.current = controller;
+    const request = ++profileRequest.current;
     try {
       setLoading(true);
-
-      const [res, invoiceRes] = await Promise.all([
-        studentService.getById(Number(id)), financeService.getStudentInvoices(Number(id)),
-      ]);
-      if (currentStudentId.current !== id) return;
+      setProfileError(null);
+      const res = isOwnProfile ? await studentService.getMyProfile(controller.signal)
+        : await studentService.getById(Number(id), controller.signal);
+      if (request !== profileRequest.current || scope !== currentScope.current || controller.signal.aborted) return;
       const data = res.data;
-
-      setStudent(data);
-      setInvoices(invoiceRes.data || []);
-
+      setProfile(data); setProfileScope(scope);
       form.setFieldsValue({
         full_name: data.full_name,
         email: data.email,
         phone: data.phone,
         status: data.status,
       });
-    } catch (err) {
-      console.error(err);
-      if (currentStudentId.current === id) message.error('Không tải được học viên');
+    } catch (err: any) {
+      if (request !== profileRequest.current || scope !== currentScope.current || controller.signal.aborted) return;
+      setProfileError(err);
+      if (err.status === 403 || err.status === 404 || err.status === 401) {
+        setProfile(null); invoiceRequest.current++; riskRequest.current++;
+        invoiceAbort.current?.abort(); riskAbort.current?.abort(); setInvoices([]); setClassRisks({});
+      }
     } finally {
-      if (currentStudentId.current === id) setLoading(false);
+      if (request === profileRequest.current && scope === currentScope.current) setLoading(false);
     }
   };
 
-  useEffect(() => {
-    setStudent(null);
-    setInvoices([]);
-    setRiskLoading(false);
-    fetchStudent();
-  }, [id]);
-  useEffect(() => {
-    let current = true;
-    setClassRisks({});
-    setRiskError(false);
+  const fetchInvoices = async (studentId: number) => {
+    if (!viewFinance) return;
+    invoiceAbort.current?.abort();
+    const controller = new AbortController(); invoiceAbort.current = controller;
+    const request = ++invoiceRequest.current;
+    setInvoiceLoading(true); setInvoiceError('');
+    try {
+      const result = await financeService.getStudentInvoices(studentId, controller.signal);
+      if (request !== invoiceRequest.current || scope !== currentScope.current || studentId !== latestStudentId.current || controller.signal.aborted) return;
+      setInvoices(result.data || []); setInvoiceOwner(`${scope}:${studentId}`);
+    } catch (error: any) {
+      if (request !== invoiceRequest.current || scope !== currentScope.current || studentId !== latestStudentId.current || controller.signal.aborted) return;
+      setInvoices([]); setInvoiceOwner(`${scope}:${studentId}`); setInvoiceError(error.message || 'Không tải được học phí');
+    } finally {
+      if (request === invoiceRequest.current && scope === currentScope.current) setInvoiceLoading(false);
+    }
+  };
+
+  const fetchRisks = async (studentId: number) => {
     if (!canReview) return;
-    setRiskFetching(true);
-    studentService.getClassDropoutRisks(Number(id)).then(res => {
-      if (current) setClassRisks(Object.fromEntries((res.data || []).map((item: DropoutRiskView) => [item.class_id, item])));
-    }).catch(error => { if (current) { setRiskError(true); message.error(error.message); } })
-      .finally(() => { if (current) setRiskFetching(false); });
-    return () => { current = false; };
-  }, [id, canReview]);
+    riskAbort.current?.abort();
+    const controller = new AbortController(); riskAbort.current = controller;
+    const request = ++riskRequest.current;
+    setRiskFetching(true); setRiskError('');
+    try {
+      const result = await studentService.getClassDropoutRisks(studentId, controller.signal);
+      if (request !== riskRequest.current || scope !== currentScope.current || studentId !== latestStudentId.current || controller.signal.aborted) return;
+      setClassRisks(Object.fromEntries((result.data || []).map((item: DropoutRiskView) => [item.class_id, item])));
+    } catch (error: any) {
+      if (request === riskRequest.current && scope === currentScope.current && !controller.signal.aborted) {
+        setClassRisks({}); setRiskError(error.message || 'Không tải được cảnh báo theo lớp');
+      }
+    } finally {
+      if (request === riskRequest.current && scope === currentScope.current) setRiskFetching(false);
+    }
+  };
+
+  const refreshAll = () => {
+    fetchStudent();
+    if (student?.id) { if (viewFinance) fetchInvoices(student.id); if (canReview) fetchRisks(student.id); }
+  };
+
+  useEffect(() => {
+    setProfile(null); setProfileScope(''); setProfileError(null);
+    setEditOpen(false); setPasswordOpen(false); setEnrollOpen(false); setNewPassword(''); setSaving(false);
+    fetchStudent();
+    return () => {
+      profileRequest.current++; invoiceRequest.current++; riskRequest.current++; scoreRequest.current++;
+      profileAbort.current?.abort(); invoiceAbort.current?.abort(); riskAbort.current?.abort();
+    };
+  }, [scope]);
+  useEffect(() => {
+    setInvoices([]); setInvoiceOwner(''); setInvoiceError(''); setInvoiceLoading(false);
+    if (student?.id && viewFinance) fetchInvoices(student.id);
+    return () => { invoiceRequest.current++; invoiceAbort.current?.abort(); };
+  }, [student?.id, scope, viewFinance]);
+  useEffect(() => {
+    setClassRisks({}); setRiskError(''); setRiskFetching(false);
+    if (student?.id && canReview) fetchRisks(student.id);
+    return () => { riskRequest.current++; riskAbort.current?.abort(); };
+  }, [student?.id, scope, canReview]);
+  useEffect(() => { scoreRequest.current++; setRiskLoading(false); }, [scope, selectedClassId]);
 
   const openRisk = (classId: number) => setSearchParams(previous => {
     const next = new URLSearchParams(previous);
@@ -174,52 +239,67 @@ export function StudentDetailPage() {
   }, { replace: true, state: navigationState });
 
   const handleUpdate = async () => {
+    if (!canManageStudent || !student || mutationBusy.current) return;
+    mutationBusy.current = true; setSaving(true);
     try {
       const values = await form.validateFields();
-
-      await studentService.update(Number(id), values);
-
+      if (scope !== currentScope.current) return;
+      await studentService.update(student.id, values);
+      if (scope !== currentScope.current) return;
       message.success('Cập nhật học viên thành công');
       setEditOpen(false);
-      fetchStudent();
+      refreshAll();
     } catch (err: any) {
-      message.error(err.message || 'Cập nhật thất bại');
+      if (scope === currentScope.current && !err.errorFields) message.error(err.message || 'Cập nhật thất bại');
+    } finally {
+      mutationBusy.current = false;
+      if (scope === currentScope.current) setSaving(false);
     }
   };
 
   const handleResetPassword = async () => {
+    if (!canManageStudent || !student || mutationBusy.current) return;
+    mutationBusy.current = true; setSaving(true);
     try {
-      const res = await studentService.resetPassword(Number(id));
+      const res = await studentService.resetPassword(student.id);
+      if (scope !== currentScope.current) return;
       setNewPassword(res.new_password);
       setPasswordOpen(true);
     } catch (err: any) {
-      message.error(err.message || 'Reset mật khẩu thất bại');
+      if (scope === currentScope.current) message.error(err.message || 'Reset mật khẩu thất bại');
+    } finally {
+      mutationBusy.current = false;
+      if (scope === currentScope.current) setSaving(false);
     }
   };
 
   const handleScoreDropoutRisk = async () => {
-    if (!selectedClassId) return;
+    if (!evaluateRisk || !student || !selectedClassId || riskLoading) return;
+    const request = ++scoreRequest.current;
     try {
       setRiskLoading(true);
-      const result = await studentService.scoreDropoutRisk(Number(id), selectedClassId);
-      if (currentStudentId.current !== id) return;
+      const result = await studentService.scoreDropoutRisk(student.id, selectedClassId);
+      if (scope !== currentScope.current || request !== scoreRequest.current) return;
       if (!result.data) throw new Error(result.reason || 'Lớp không còn trong giai đoạn theo dõi');
-      setClassRisks(previous => ({ ...previous, [selectedClassId]: { ...result.data, limited_data: result.data?.snapshot?.limited_data } }));
+      await fetchRisks(student.id);
+      if (scope !== currentScope.current || request !== scoreRequest.current) return;
       message.success('Đã cập nhật đánh giá nguy cơ bỏ học');
     } catch (err: any) {
-      message.error(err.message || 'Không cập nhật được đánh giá');
+      if (scope === currentScope.current && request === scoreRequest.current) message.error(err.message || 'Không cập nhật được đánh giá');
     } finally {
-      if (currentStudentId.current === id) setRiskLoading(false);
+      if (scope === currentScope.current && request === scoreRequest.current) setRiskLoading(false);
     }
   };
 
   const copyPassword = async () => {
-    await navigator.clipboard.writeText(newPassword);
-    message.success('Đã copy mật khẩu');
+    try {
+      await navigator.clipboard.writeText(newPassword);
+      message.success('Đã copy mật khẩu');
+    } catch { message.error('Không sao chép được. Vui lòng chọn và sao chép mật khẩu.'); }
   };
 
   if (!student) {
-    return loading ? <Card loading /> : <div>Không tìm thấy học viên</div>;
+    return profileError ? <StudentProfileError error={profileError} own={isOwnProfile} onRetry={fetchStudent} /> : <Card loading />;
   }
 
   const enrolledClasses = student.classEnrollments || [];
@@ -230,7 +310,9 @@ export function StudentDetailPage() {
     {
       title: 'Lớp học',
       render: (_: any, record: any) => (
-        <Button type="link" style={{ padding: 0 }} onClick={() => openDetail(`/lms/classes/${record.class_id}?tab=students`)}>{record.class?.name}</Button>
+        canManageStudent || user?.role === 'teacher' || record.status === 'active'
+          ? <Button type="link" style={{ padding: 0 }} onClick={() => openDetail(`/lms/classes/${record.class_id}${isStudent ? '' : '?tab=students'}`)}>{record.class?.name}</Button>
+          : record.class?.name
       ),
     },
     {
@@ -244,16 +326,20 @@ export function StudentDetailPage() {
     },
     {
       title: 'Trạng thái',
-      render: (_: any, record: any) => (
-        <Tag color={record.class?.status === 'ongoing' ? 'green' : 'blue'}>
-          {record.class?.status === 'ongoing' ? 'Đang học' : 'Sắp khai giảng'}
-        </Tag>
-      ),
+      render: (_: any, record: any) => {
+        const status = getClassStatus(record.class?.status);
+        return <Space wrap><Tag color={status.color}>{status.label}</Tag>
+          {record.status === 'dropped' && <Tag color="red">Đã nghỉ lớp</Tag>}
+          {record.status === 'completed' && <Tag>Đã hoàn thành đăng ký</Tag>}
+        </Space>;
+      },
     },
     ...(canReview ? [{
       title: 'Nguy cơ bỏ học',
       width: 180,
-      render: (_: any, record: any) => record.class?.status !== 'ongoing' ? <Typography.Text type="secondary">Chưa bắt đầu</Typography.Text>
+      render: (_: any, record: any) => record.status !== 'active' || ['completed', 'cancelled'].includes(record.class?.status)
+        ? <Typography.Text type="secondary">Đã kết thúc theo dõi</Typography.Text>
+        : record.class?.status !== 'ongoing' ? <Typography.Text type="secondary">Chưa bắt đầu</Typography.Text>
         : riskError ? <Typography.Text type="secondary">Không tải được đánh giá</Typography.Text>
         : riskFetching ? <Typography.Text type="secondary">Đang tải…</Typography.Text>
         : classRisks[record.class_id] ? <RiskEstimate data={classRisks[record.class_id]} showReason={false} onOpen={() => openRisk(record.class_id)} />
@@ -291,20 +377,21 @@ export function StudentDetailPage() {
   ];
 
   const invoiceColumns = [
-    { title: 'Invoice', dataIndex: 'invoice_no' },
-    { title: 'Phải thu', dataIndex: 'total_amount', render: money },
+    { title: 'Mã khoản thu', dataIndex: 'invoice_no' },
+    { title: 'Phải thu sau giảm giá', dataIndex: 'payable_amount', render: money },
     { title: 'Đã thu', dataIndex: 'paid_amount', render: money },
     { title: 'Còn nợ', dataIndex: 'remaining_amount', render: money },
     {
       title: 'Hạn thu',
       dataIndex: 'due_date',
-      render: (value: string) => value ? new Date(value).toLocaleDateString('vi-VN') : '-',
+      render: (value: string) => billingDate(value),
     },
     {
       title: 'Trạng thái',
-      dataIndex: 'status',
-      render: (status: string) => <Tag color={status === 'paid' ? 'green' : status === 'partial' ? 'blue' : 'orange'}>{status}</Tag>,
+      dataIndex: 'collection_status',
+      render: (status: string) => <BillingStatusTag status={status} />,
     },
+    ...(!isStudent ? [{ title: 'Thao tác', render: (_: any, record: any) => <Button type="link" onClick={() => openDetail(invoiceCollectionLink(record.id))}>Xem khoản phải thu</Button> }] : []),
   ];
 
   return (
@@ -313,12 +400,14 @@ export function StudentDetailPage() {
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'LMS' },
-          { title: 'Học viên', href: '/lms/students' },
-          { title: student.full_name },
+          ...(isStudent ? [{ title: 'Hồ sơ của tôi' }] : [{ title: 'Học viên', href: '/lms/students' }, { title: student.full_name }]),
         ]}
-        actions={<Space>
+        actions={<Space wrap>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={refreshAll}>Tải lại</Button>
+          {canManageStudent && <>
           <Button
             icon={<KeyOutlined />}
+            disabled={saving}
             onClick={handleResetPassword}
           >
             Cấp lại mật khẩu
@@ -327,12 +416,17 @@ export function StudentDetailPage() {
           <Button
             type="primary"
             icon={<EditOutlined />}
+            disabled={saving}
             onClick={() => setEditOpen(true)}
           >
             Chỉnh sửa
           </Button>
+          </>}
         </Space>}
       />
+
+      {profileError && <div className="mb-4"><StudentProfileError error={profileError} own={isOwnProfile} onRetry={fetchStudent} />
+        <Typography.Text type="secondary">Đang hiển thị hồ sơ của lần tải trước.</Typography.Text></div>}
 
       <Tabs
         activeKey={activeTab}
@@ -348,18 +442,18 @@ export function StudentDetailPage() {
             label: 'Tổng quan',
             children: (
               <>
-                <Row gutter={16} className="mb-4">
-                  <Col span={8}>
+                <Row gutter={[16, 16]} className="mb-4">
+                  <Col xs={24} sm={canViewLead ? 8 : 12}>
                     <Card>
                       <Statistic
-                        title="Số lớp đang học"
+                        title="Số lớp đang tham gia"
                         value={activeClasses.length}
                         prefix={<TeamOutlined />}
                       />
                     </Card>
                   </Col>
 
-                  <Col span={8}>
+                  <Col xs={24} sm={canViewLead ? 8 : 12}>
                     <Card>
                       <Statistic
                         title="Trạng thái"
@@ -368,14 +462,14 @@ export function StudentDetailPage() {
                     </Card>
                   </Col>
 
-                  <Col span={8}>
+                  {canViewLead && <Col xs={24} sm={8}>
                     <Card>
                       <Statistic
                         title="Nguồn"
-                        value={student.lead ? 'Từ Lead' : 'Đăng ký trực tiếp'}
+                        value={student.lead_id ? 'Từ Lead' : 'Đăng ký trực tiếp'}
                       />
                     </Card>
-                  </Col>
+                  </Col>}
                 </Row>
 
                 <Card loading={loading}>
@@ -410,17 +504,17 @@ export function StudentDetailPage() {
                         : '-'}
                     </Descriptions.Item>
 
-                    <Descriptions.Item label="Tài khoản user">
+                    <Descriptions.Item label="Tài khoản đăng nhập">
                       {student.user?.email || '-'}
                     </Descriptions.Item>
 
-                    <Descriptions.Item label="Nguồn lead">
+                    {canViewLead && <Descriptions.Item label="Nguồn lead">
                       {student.lead?.full_name || 'Không có'}
-                    </Descriptions.Item>
+                    </Descriptions.Item>}
 
-                    <Descriptions.Item label="Lead email">
+                    {canViewLead && <Descriptions.Item label="Lead email">
                       {student.lead?.email || '-'}
-                    </Descriptions.Item>
+                    </Descriptions.Item>}
                   </Descriptions>
                 </Card>
               </>
@@ -429,12 +523,21 @@ export function StudentDetailPage() {
 
           {
             key: 'classes',
-            label: 'Lớp đang học',
+            label: 'Lớp học',
             children: (
-              <Card title={`Lớp đang học (${activeClasses.length})`}>
+              <Card title={`Lớp học (${enrolledClasses.length})`}
+                extra={canManageStudent && student.lead?.course_id && !activeClasses.some((item: any) => item.class?.course_id === student.lead.course_id)
+                  ? <Button type="primary" onClick={() => setEnrollOpen(true)}>Xếp lớp</Button> : undefined}>
+                {!activeClasses.length && student.lead && <Alert className="mb-4" type="info" showIcon message="Học viên đã được chuyển từ Lead, chưa có lớp đang học hoặc sắp mở."
+                  description={canManageStudent ? !student.lead.course_id
+                    ? <Button type="link" onClick={() => openDetail(`/crm/leads/${student.lead.id}`)}>Bổ sung khóa quan tâm tại Lead</Button>
+                    : 'Chọn Xếp lớp để tiếp tục đăng ký học.' : 'Học viên đang chờ Admin xếp lớp.'} />}
+                {isStudent && !activeClasses.length && <Alert className="mb-4" type="info" showIcon message="Chưa có lớp đang học hoặc sắp mở. Vui lòng liên hệ trung tâm nếu cần xếp lớp." />}
+                {canReview && riskError && <Alert className="mb-4" type="error" showIcon message={riskError}
+                  action={<Button loading={riskFetching} onClick={() => fetchRisks(student.id)}>Thử lại</Button>} />}
                 <Table
-                  rowKey="id"
-                  dataSource={activeClasses}
+                  rowKey="class_id"
+                  dataSource={enrolledClasses}
                   columns={classColumns}
                   pagination={false}
                   scroll={{ x: 900 }}
@@ -449,8 +552,8 @@ export function StudentDetailPage() {
             children: (
               <Card title="Lịch học hiện tại">
                 <Table
-                  rowKey="id"
-                  dataSource={enrolledClasses}
+                  rowKey="class_id"
+                  dataSource={activeClasses}
                   columns={scheduleColumns}
                   pagination={false}
                 />
@@ -462,27 +565,33 @@ export function StudentDetailPage() {
             label: 'Học phí',
             children: (
               <Card title="Khoản phải thu và công nợ">
-                <Table
+                {invoiceError ? <Alert type="error" showIcon message="Không tải được học phí" description={invoiceError}
+                  action={<Button loading={invoiceLoading} onClick={() => fetchInvoices(student.id)}>Thử lại</Button>} /> : <Table
                   rowKey="id"
-                  dataSource={invoices}
+                  loading={invoiceLoading || invoiceOwner !== `${scope}:${student.id}`}
+                  dataSource={invoiceOwner === `${scope}:${student.id}` ? invoices : []}
                   columns={invoiceColumns}
                   pagination={false}
-                />
+                  locale={{ emptyText: invoiceLoading || invoiceOwner !== `${scope}:${student.id}` ? 'Đang tải học phí…' : 'Chưa có khoản phải thu' }}
+                />}
               </Card>
             ),
           },
-        ]}
+        ].filter(tab => tab.key !== 'finance' || viewFinance)}
       />
 
+      {canManageStudent && <LeadEnrollmentModal open={enrollOpen} lead={student.lead} studentId={student.id} onCancel={() => setEnrollOpen(false)}
+        onSuccess={() => { if (scope === currentScope.current) { setEnrollOpen(false); refreshAll(); } }} />}
       <RiskDetailsDrawer open={canReview && !!selectedClass && !!classRisks[selectedClassId!]}
         onClose={closeRisk} name={student.full_name} className={selectedClass?.class?.name}
         data={selectedClassId ? classRisks[selectedClassId] : undefined} loading={riskLoading}
-        onEvaluate={selectedClass?.class?.status === 'ongoing' ? handleScoreDropoutRisk : undefined} />
+        onEvaluate={evaluateRisk && selectedClass?.class?.status === 'ongoing' ? handleScoreDropoutRisk : undefined} />
 
       {/* EDIT */}
       <Modal
         title="Chỉnh sửa học viên"
-        open={editOpen}
+        open={canManageStudent && editOpen}
+        confirmLoading={saving}
         onCancel={() => setEditOpen(false)}
         onOk={handleUpdate}
         okText="Lưu"
@@ -533,7 +642,7 @@ export function StudentDetailPage() {
       {/* RESET PASSWORD */}
       <Modal
         title="Mật khẩu mới"
-        open={passwordOpen}
+        open={canManageStudent && passwordOpen}
         onCancel={() => setPasswordOpen(false)}
         footer={[
           <Button

@@ -29,7 +29,7 @@ import {
 import type { ColumnsType } from 'antd/es/table';
 import type { UploadProps } from 'antd';
 import dayjs from 'dayjs';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useAuth } from '@/shared/contexts/AuthContext';
 import { leadService, type LeadSourceOption } from '@/services/api/lead.service';
@@ -38,31 +38,19 @@ import { userService } from '@/services/api/user.service';
 import { LeadPipelineBoard } from './components/LeadPipelineBoard';
 import { LeadFunnelAnalytics } from './components/LeadFunnelAnalytics';
 import { MarkLostModal } from './components/MarkLostModal';
+import { LeadEnrollmentModal } from './components/LeadEnrollmentModal';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { getLeadScore } from './leadScore';
 import { LeadCareSummary } from './components/LeadCareSummary';
 import { getLeadSourceLabel } from './leadSources';
 import { getLeadGuidance } from './leadGuidance';
 import { LeadOverviewStats } from './components/LeadOverviewStats';
+import { getLeadAssigneeOptions, hasLeadAssignee, canUnassignLead, leadContactBlockReason, leadConvertBlockReason } from './leadAssignment';
+import { readLeadLocation, writeLeadLocation, type LeadViewMode } from './leadFilters';
+import { LEAD_STATUSES, getLeadStatus, LEAD_ACTIONS, LEAD_MESSAGES } from './leadStatus';
 
 const { RangePicker } = DatePicker;
-
-const statusColors: Record<string, string> = {
-  new: 'blue',
-  contacted: 'cyan',
-  interested: 'gold',
-  trial: 'purple',
-  enrolled: 'green',
-  lost: 'red',
-};
-
-const statusLabels: Record<string, string> = {
-  new: 'Mới',
-  contacted: 'Đã liên hệ',
-  interested: 'Quan tâm',
-  trial: 'Học thử',
-  enrolled: 'Đã đăng ký',
-  lost: 'Thất bại',
-};
+const pageSizeOptions = [10, 25, 50, 100];
 
 const occupationOptions = [
   { label: 'Sinh viên năm 1-2', value: 'student_y1_y2' },
@@ -117,6 +105,11 @@ function parseCsv(text: string) {
 
 export function LeadsListPage() {
   const navigate = useNavigate();
+  const { openDetail } = useDetailNavigation();
+  const [convertLead, setConvertLead] = useState<any>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { filters, viewMode } = useMemo(() => readLeadLocation(searchParams), [searchParams]);
+  const filterKey = writeLeadLocation(filters, 'pipeline').toString();
   const { user } = useAuth();
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [importVisible, setImportVisible] = useState(false);
@@ -126,21 +119,23 @@ export function LeadsListPage() {
   const [courses, setCourses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [assignLead, setAssignLead] = useState<any>(null);
-  const [assignSaleId, setAssignSaleId] = useState<number>();
+  const [assignSaleId, setAssignSaleId] = useState(0);
+  const [assigning, setAssigning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [overview, setOverview] = useState<any>(null);
   const listRequest = useRef(0);
+  const refreshTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [importing, setImporting] = useState(false);
-  const [filters, setFilters] = useState<any>({});
-  const [searchDraft, setSearchDraft] = useState('');
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [searchDraft, setSearchDraft] = useState(filters.search || '');
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50, total: 0 });
-  const [viewMode, setViewMode] = useState<'pipeline' | 'table' | 'funnel'>('pipeline');
   const [lostTargetLead, setLostTargetLead] = useState<any | null>(null);
   const latestView = useRef({ filters, pagination });
   latestView.current = { filters, pagination };
 
-  const fetchLeads = async (page = pagination.current, pageSize = pagination.pageSize, nextFilters = filters) => {
+  const fetchLeads = async (page = pagination.current, pageSize = pagination.pageSize, nextFilters = filters): Promise<void> => {
     const requestId = ++listRequest.current;
     try {
       setLoading(true);
@@ -160,6 +155,8 @@ export function LeadsListPage() {
       };
       const [res, report] = await Promise.all([leadService.getAll(params), leadService.getFunnel(params)]);
       if (requestId !== listRequest.current) return;
+      const lastPage = Math.max(1, Math.ceil((res.pagination?.total || 0) / pageSize));
+      if (page > lastPage) return fetchLeads(lastPage, pageSize, nextFilters);
       setLeads(res.data || []);
       setOverview(report.data);
       setLoadError('');
@@ -209,21 +206,26 @@ export function LeadsListPage() {
     }
   };
 
-  const handleViewModeChange = (mode: 'pipeline' | 'table' | 'funnel') => {
-    setViewMode(mode);
-    if (mode === 'pipeline') {
-      fetchLeads(1, 50);
-    } else if (mode === 'table') {
-      fetchLeads(1, 10);
-    }
+  const handleViewModeChange = (mode: LeadViewMode) => {
+    setSearchParams(writeLeadLocation(filters, mode), { replace: true });
   };
 
   useEffect(() => {
-    fetchLeads(1, 50);
     fetchSources();
     fetchCourses();
     fetchSales();
+    return () => {
+      listRequest.current++;
+      refreshTimers.current.forEach(clearTimeout);
+      refreshTimers.current = [];
+    };
   }, [user?.role]);
+
+  // Tab changes retain pagination; only actual filters or the current user reload page 1.
+  useEffect(() => {
+    setSearchDraft(filters.search || '');
+    fetchLeads(1, pagination.pageSize, filters);
+  }, [filterKey, user?.id, user?.role]);
 
   const courseOptions = courses.map((course) => ({
     label: course.name,
@@ -232,23 +234,31 @@ export function LeadsListPage() {
 
   const handleFilterChange = (patch: any) => {
     const next = { ...filters, ...patch };
-    setFilters(next);
-    fetchLeads(1, pagination.pageSize, next);
+    setSearchParams(writeLeadLocation(next, viewMode), { replace: true });
   };
 
   const handleCreateLead = async (values: any) => {
+    if (creating) return;
     try {
+      setCreating(true);
       const created = await leadService.create(values);
-      message.success('Đã tạo lead. Hệ thống đang chấm điểm AI.');
+      message.success(LEAD_MESSAGES.created);
       setDrawerVisible(false);
       form.resetFields();
-      fetchLeads(1);
+      refreshList(true);
 
       if (created?.data?.id) {
-        setTimeout(() => refreshList(true), 2500);
+        refreshTimers.current.push(setTimeout(() => refreshList(), 2500));
       }
     } catch (err: any) {
-      message.error(err.message || 'Tạo lead thất bại');
+      if (err.status === 409 && err.duplicateFields?.length) {
+        form.setFields(err.duplicateFields.map((name: string) => ({
+          name, errors: [name === 'phone' ? 'Số điện thoại đã tồn tại trong danh sách lead' : 'Email đã tồn tại trong danh sách lead'],
+        })));
+        message.warning(err.message);
+      } else message.error(err.message || LEAD_MESSAGES.createFailed);
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -260,70 +270,54 @@ export function LeadsListPage() {
       okType: 'danger',
       cancelText: 'Hủy',
       onOk: async () => {
-        await leadService.remove(id);
-        message.success('Đã xóa lead');
-        fetchLeads(pagination.current);
-      },
-    });
-  };
-
-  const handleConvert = (lead: any) => {
-    Modal.confirm({
-      title: 'Chuyển lead thành học viên?',
-      content: lead.email
-        ? `${lead.full_name} sẽ được tạo tài khoản học viên.`
-        : 'Lead chưa có email. Hãy bổ sung email trước khi convert để tạo tài khoản học viên.',
-      okText: 'Chuyển',
-      cancelText: 'Hủy',
-      okButtonProps: { disabled: !lead.email },
-      onOk: async () => {
         try {
-          await leadService.convert(lead.id);
-          message.success('Đã chuyển lead thành học viên');
-          fetchLeads(pagination.current);
+          await leadService.remove(id);
+          message.success(LEAD_MESSAGES.deleted);
+          refreshList();
         } catch (err: any) {
-          message.error(err.message || 'Chuyển đổi thất bại');
+          message.error(err.message || LEAD_MESSAGES.deleteFailed);
+          throw err;
         }
       },
     });
   };
 
-  const handleClaimLead = async (lead: any) => {
-    if (!user?.id) return;
-    try {
-      await leadService.update(String(lead.id), { assigned_to: Number(user.id) });
-      message.success('Đã phân công lead cho bạn phụ trách');
-      fetchLeads(pagination.current);
-    } catch (err: any) {
-      message.error(err.message || 'Phân công lead thất bại');
-    }
+  const handleConvert = (lead: any) => {
+    const reason = leadConvertBlockReason(lead);
+    if (reason) { message.warning(reason); return; }
+    setConvertLead(lead);
   };
 
   const openAssignModal = (lead: any) => {
     setAssignLead(lead);
-    setAssignSaleId(lead.assignedUser?.id);
+    setAssignSaleId(lead.assigned_to ?? 0);
   };
 
   const handleAssignLead = async () => {
-    if (!assignLead || !assignSaleId) {
-      message.warning('Chọn sale phụ trách');
+    if (!assignLead || assigning) return;
+    if (assignSaleId === (assignLead.assigned_to ?? 0)) {
+      setAssignLead(null);
       return;
     }
 
     try {
-      await leadService.update(String(assignLead.id), { assigned_to: assignSaleId });
-      message.success('Đã phân công lead cho sale phụ trách');
+      setAssigning(true);
+      await leadService.update(String(assignLead.id), { assigned_to: assignSaleId === 0 ? null : assignSaleId });
+      message.success(assignSaleId === 0 ? LEAD_MESSAGES.unassigned : LEAD_MESSAGES.assigned);
       setAssignLead(null);
-      setAssignSaleId(undefined);
-      fetchLeads(pagination.current);
+      setAssignSaleId(0);
+      refreshList();
     } catch (err: any) {
-      message.error(err.message || 'Phân công lead thất bại');
+      message.error(err.message || LEAD_MESSAGES.assignFailed);
+    } finally {
+      setAssigning(false);
     }
   };
 
   const handleCsvFile: UploadProps['beforeUpload'] = async (file) => {
     try {
       setImporting(true);
+      setImportErrors([]);
       const text = await file.text();
       const rows = parseCsv(text);
       if (!rows.length) {
@@ -333,7 +327,8 @@ export function LeadsListPage() {
 
       let success = 0;
       let failed = 0;
-      for (const row of rows) {
+      const errors: string[] = [];
+      for (const [index, row] of rows.entries()) {
         try {
           await leadService.create({
             full_name: row.full_name || row.name || row['họ tên'] || row['ho ten'],
@@ -345,15 +340,20 @@ export function LeadsListPage() {
             course_id: row.course_id ? Number(row.course_id) : undefined,
           });
           success += 1;
-        } catch (err) {
+        } catch (err: any) {
           failed += 1;
+          errors.push(`Dòng dữ liệu ${index + 1}: ${err.message || 'Không tạo được lead'}`);
         }
       }
 
-      message.success(`Import xong: ${success} lead thành công${failed ? `, ${failed} dòng lỗi` : ''}`);
-      setImportVisible(false);
-      fetchLeads(1);
-      setTimeout(() => refreshList(true), 3000);
+      setImportErrors(errors);
+      if (failed) message.warning(`Import xong: ${success} lead thành công, ${failed} dòng bị chặn hoặc lỗi`);
+      else {
+        message.success(`Import xong: ${success} lead thành công`);
+        setImportVisible(false);
+      }
+      refreshList(true);
+      refreshTimers.current.push(setTimeout(() => refreshList(), 3000));
     } catch (err: any) {
       message.error(err.message || 'Không đọc được file CSV');
     } finally {
@@ -396,7 +396,7 @@ export function LeadsListPage() {
     {
       title: 'Trạng thái',
       dataIndex: 'status',
-      render: (status: string) => <Tag color={statusColors[status] || 'default'}>{statusLabels[status] || status}</Tag>,
+      render: (status: string) => <Tag color={getLeadStatus(status)?.color || 'default'}>{getLeadStatus(status)?.label || status}</Tag>,
     },
     {
       title: 'Điểm tham khảo',
@@ -405,7 +405,8 @@ export function LeadsListPage() {
         return <LeadCareSummary lead={record} compact />;
       },
     },
-    { title: 'Việc tiếp theo', width: 220, render: (_, record) => <span className="text-sm text-gray-600">{getLeadGuidance(record).title}</span> },
+    { title: 'Việc tiếp theo', width: 220, render: (_, record) => <span className="text-sm text-gray-600">{
+      !hasLeadAssignee(record) && !['enrolled', 'lost'].includes(record.status) ? 'Phân công Sale phụ trách' : getLeadGuidance(record).title}</span> },
     { title: 'Phụ trách', render: (_, record) => record.assignedUser?.full_name || 'Chưa phân công' },
     {
       title: 'Liên hệ gần nhất',
@@ -418,11 +419,13 @@ export function LeadsListPage() {
         <Space size="small">
           <Button type="link" onClick={() => navigate(`/crm/leads/${record.id}`)}>Chi tiết</Button>
           <Dropdown menu={{ items: [
-            ...(!['enrolled', 'lost'].includes(record.status) ? [{ key: 'contact', label: 'Ghi nhận liên hệ', onClick: () => navigate(`/crm/leads/${record.id}?contact=1`) }] : []),
-            ...(user?.role === 'admin' ? [{ key: 'assign', label: 'Phân công sale', onClick: () => openAssignModal(record) }] : []),
-            ...(user?.role === 'sale' && !record.assignedUser ? [{ key: 'claim', label: 'Nhận phụ trách', onClick: () => handleClaimLead(record) }] : []),
-            { key: 'convert', label: 'Chuyển thành học viên', disabled: ['enrolled', 'lost'].includes(record.status) || !record.email, onClick: () => handleConvert(record) },
-            ...(!['enrolled', 'lost'].includes(record.status) ? [{ key: 'lost', label: 'Đánh dấu thất bại', onClick: () => setLostTargetLead(record) }] : []),
+            ...(!['enrolled', 'lost'].includes(record.status) ? [{ key: 'contact', label: <Tooltip title={leadContactBlockReason(record)}><span>{LEAD_ACTIONS.contact}</span></Tooltip>,
+              disabled: !!leadContactBlockReason(record), onClick: () => navigate(`/crm/leads/${record.id}?contact=1`) }] : []),
+            ...(record.student?.id ? [{ key: 'student', label: 'Xem hồ sơ học viên', onClick: () => openDetail(`/lms/students/${record.student.id}?tab=classes`) }] : []),
+            ...(user?.role === 'admin' ? [{ key: 'assign', label: LEAD_ACTIONS.assign, onClick: () => openAssignModal(record) }] : []),
+            { key: 'convert', label: <Tooltip title={leadConvertBlockReason(record)}><span>{LEAD_ACTIONS.convert}</span></Tooltip>,
+              disabled: !!leadConvertBlockReason(record), onClick: () => handleConvert(record) },
+            ...(!['enrolled', 'lost'].includes(record.status) ? [{ key: 'lost', label: LEAD_ACTIONS.lost, onClick: () => setLostTargetLead(record) }] : []),
             ...(user?.role === 'admin' ? [{ key: 'delete', label: 'Xóa lead', danger: true, onClick: () => handleDelete(record.id) }] : []),
           ] }} trigger={['click']}><Button aria-label={`Thao tác với ${record.full_name}`} type="text" icon={<EllipsisOutlined />} /></Dropdown>
         </Space>
@@ -432,14 +435,14 @@ export function LeadsListPage() {
 
   const tableData = leads;
   const listFilters = <div className="mb-4 flex flex-wrap items-center gap-3">
-    <Input.Search aria-label="Tìm lead" placeholder="Tên, số điện thoại, email" allowClear style={{ width: 230 }} value={searchDraft} onChange={event => setSearchDraft(event.target.value)} onSearch={search => handleFilterChange({ search })} />
-    <Select aria-label="Lọc giai đoạn" placeholder="Tất cả giai đoạn" allowClear style={{ width: 160 }} value={filters.status} options={Object.entries(statusLabels).map(([value, label]) => ({ value, label }))} onChange={status => handleFilterChange({ status })} />
+    <Input.Search aria-label="Tìm lead" placeholder="Tên, số điện thoại, email" allowClear style={{ width: 230 }} value={searchDraft} onChange={event => setSearchDraft(event.target.value)} onSearch={search => handleFilterChange({ search: search.trim() || undefined })} />
+    <Select aria-label="Lọc giai đoạn" placeholder="Tất cả giai đoạn" allowClear style={{ width: 160 }} value={filters.status} options={LEAD_STATUSES.map(({ value, label }) => ({ value, label }))} onChange={status => handleFilterChange({ status })} />
     <Select aria-label="Lọc nguồn lead" placeholder="Tất cả nguồn" allowClear style={{ width: 160 }} value={filters.source} options={sourceOptions} onChange={source => handleFilterChange({ source })} />
     <Select aria-label="Lọc khóa học" placeholder="Tất cả khóa học" allowClear style={{ width: 175 }} value={filters.course_id} options={courseOptions} onChange={course_id => handleFilterChange({ course_id })} />
-    {user?.role === 'admin' && <Select aria-label="Lọc sale phụ trách" placeholder="Tất cả sale" allowClear style={{ width: 165 }} value={filters.assigned_to} options={sales.map(sale => ({ label: sale.full_name, value: sale.id }))} onChange={assigned_to => handleFilterChange({ assigned_to })} />}
+    {user?.role === 'admin' && <Select aria-label="Lọc sale phụ trách" placeholder="Tất cả sale" allowClear style={{ width: 165 }} value={filters.assigned_to} options={[{ label: 'Chưa phân công', value: 'unassigned' }, ...sales.map(sale => ({ label: sale.full_name, value: sale.id }))]} onChange={assigned_to => handleFilterChange({ assigned_to })} />}
     <Space size={6}><Switch size="small" aria-label="Chỉ lead cần chăm sóc" checked={Boolean(filters.needs_care)} onChange={needs_care => handleFilterChange({ needs_care })} /><Tooltip title="Lead chưa liên hệ hoặc đã quá 3 ngày chưa liên hệ lại; chỉ tính lead đang chăm sóc."><span className="text-xs text-gray-600">Cần chăm sóc (&gt;3 ngày)</span></Tooltip></Space>
-    {viewMode === 'pipeline' && filters.dateRange && <Tag closable onClose={() => handleFilterChange({ dateRange: undefined })}>Đang lọc ngày tạo</Tag>}
-    {Object.values(filters).some(Boolean) && <Button type="link" size="small" onClick={() => { setFilters({}); setSearchDraft(''); fetchLeads(1, pagination.pageSize, {}); }}>Xóa bộ lọc</Button>}
+    <RangePicker aria-label="Lọc ngày tạo" placeholder={['Tạo từ ngày', 'Đến ngày']} value={filters.dateRange} onChange={dateRange => handleFilterChange({ dateRange })} />
+    {Object.values(filters).some(Boolean) && <Button type="link" size="small" onClick={() => { setSearchDraft(''); setSearchParams(writeLeadLocation({}, viewMode), { replace: true }); }}>Xóa bộ lọc</Button>}
   </div>;
 
   return (
@@ -453,20 +456,22 @@ export function LeadsListPage() {
         ]}
         actions={
           <Space wrap>
-            {viewMode !== 'funnel' && <Button icon={<ReloadOutlined />} onClick={() => fetchLeads()}>Tải lại</Button>}
+            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => refreshList()}>Tải lại</Button>
             <Button icon={<InboxOutlined />} onClick={() => setImportVisible(true)}>Import CSV</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setDrawerVisible(true)}>Thêm lead</Button>
           </Space>
         }
       />
 
-      {viewMode !== 'funnel' && <div className="mb-4 space-y-2">
-        {loadError && <Alert type="error" showIcon message={loadError} description="Chưa tải được dữ liệu mới. Bạn có thể thử tải lại." />}
+      <div className="mb-4 space-y-2">
+        {loadError && <Alert type="error" showIcon message={loadError} description="Chưa tải được dữ liệu mới. Dữ liệu đang hiển thị thuộc lần tải thành công trước đó."
+          action={<Button size="small" onClick={() => refreshList()}>Thử lại</Button>} />}
         <LeadOverviewStats data={overview} loading={loading} manager={user?.role === 'admin'} />
         <div className="text-xs text-gray-500">Tổng quan theo bộ lọc hiện tại · {overview?.summary?.totalLeads ?? '—'} lead</div>
-      </div>}
+      </div>
 
       <div className="rounded-lg bg-white p-4 shadow-sm">
+        {listFilters}
         <Tabs
           activeKey={viewMode}
           onChange={(val) => handleViewModeChange(val as any)}
@@ -475,15 +480,15 @@ export function LeadsListPage() {
               key: 'pipeline',
               label: 'Phễu bán hàng',
               children: (<div>
-                {listFilters}
                 <LeadPipelineBoard
                   leads={leads}
                   sourceOptions={sourceOptions}
                   loading={loading}
-                  onRefresh={() => fetchLeads()}
+                  onRefresh={() => refreshList()}
                   onConvert={handleConvert}
+                  includeLost={filters.status === 'lost'}
                 />
-                <Pagination className="mt-4" current={pagination.current} pageSize={pagination.pageSize} total={pagination.total} showSizeChanger pageSizeOptions={[25, 50, 100]} showTotal={total => `${total} lead · thẻ hiển thị theo trang`} onChange={(page, size) => fetchLeads(page, size)} />
+                <Pagination className="mt-4" current={pagination.current} pageSize={pagination.pageSize} total={pagination.total} showSizeChanger pageSizeOptions={pageSizeOptions} showTotal={total => `${total} lead · thẻ hiển thị theo trang`} onChange={(page, size) => fetchLeads(page, size)} />
               </div>),
             },
             {
@@ -491,11 +496,6 @@ export function LeadsListPage() {
               label: 'Danh sách chi tiết',
               children: (
                 <div>
-                  {listFilters}
-                  <Space className="mb-4 w-full" size={12} wrap>
-                    <RangePicker aria-label="Lọc ngày tạo" placeholder={['Tạo từ ngày', 'Đến ngày']} value={filters.dateRange} onChange={(dateRange) => handleFilterChange({ dateRange })} />
-                  </Space>
-
                   <Table
                     columns={columns}
                     dataSource={tableData}
@@ -507,7 +507,7 @@ export function LeadsListPage() {
                       pageSize: pagination.pageSize,
                       total: pagination.total,
                       showSizeChanger: true,
-                      pageSizeOptions: [5, 7, 10, 20, 50],
+                      pageSizeOptions,
                       showTotal: (total) => `Tổng ${total} lead`,
                       onChange: (page, pageSize) => fetchLeads(page, pageSize),
                     }}
@@ -521,8 +521,8 @@ export function LeadsListPage() {
               children: (
                 <LeadFunnelAnalytics
                   sourceOptions={sourceOptions}
-                  courses={courses}
-                  sales={sales}
+                  data={overview}
+                  loading={loading}
                   userRole={user?.role}
                 />
               ),
@@ -536,10 +536,12 @@ export function LeadsListPage() {
           <Form.Item name="full_name" label="Họ tên" rules={[{ required: true, message: 'Nhập họ tên' }]}>
             <Input placeholder="Nguyễn Văn A" />
           </Form.Item>
-          <Form.Item name="phone" label="Số điện thoại" rules={[{ required: true, message: 'Nhập số điện thoại' }]}>
-            <Input placeholder="090xxxxxxx" />
+          <Form.Item name="phone" label="Số điện thoại" rules={[{ required: true, message: 'Nhập số điện thoại' },
+            { pattern: /^[0-9]{10}$/, transform: value => value?.trim(), message: 'Số điện thoại phải có đúng 10 chữ số' }]}>
+            <Input placeholder="0901234567" inputMode="numeric" />
           </Form.Item>
-          <Form.Item name="email" label="Email" rules={[{ type: 'email', message: 'Email không hợp lệ' }]}>
+          <Form.Item name="email" label="Email" rules={[{ required: true, whitespace: true, message: 'Nhập email' },
+            { type: 'email', transform: value => value?.trim(), message: 'Email không hợp lệ' }, { max: 255, message: 'Email tối đa 255 ký tự' }]}>
             <Input placeholder="email@gmail.com" />
           </Form.Item>
           <Form.Item name="source" label="Nguồn lead" rules={[{ required: true, message: 'Chọn nguồn lead' }]}>
@@ -556,7 +558,7 @@ export function LeadsListPage() {
           </Form.Item>
           <Form.Item>
             <Space>
-              <Button type="primary" htmlType="submit">Tạo lead</Button>
+              <Button type="primary" htmlType="submit" loading={creating}>Tạo lead</Button>
               <Button onClick={() => setDrawerVisible(false)}>Hủy</Button>
             </Space>
           </Form.Item>
@@ -568,11 +570,12 @@ export function LeadsListPage() {
         open={!!assignLead}
         onCancel={() => {
           setAssignLead(null);
-          setAssignSaleId(undefined);
+          setAssignSaleId(0);
         }}
         onOk={handleAssignLead}
-        okText="Phân công"
+        okText="Lưu"
         cancelText="Hủy"
+        confirmLoading={assigning}
       >
         <Space direction="vertical" className="w-full" size={12}>
           <div>
@@ -586,11 +589,9 @@ export function LeadsListPage() {
             onChange={setAssignSaleId}
             showSearch
             optionFilterProp="label"
-            options={sales.map((sale) => ({
-              label: `${sale.full_name} (${sale.email})`,
-              value: sale.id,
-            }))}
+            options={getLeadAssigneeOptions(sales, assignLead)}
           />
+          {!canUnassignLead(assignLead) && <div className="text-xs text-gray-500">Lead đang được chăm sóc. Hãy chọn Sale khác để chuyển người phụ trách.</div>}
         </Space>
       </Modal>
 
@@ -608,17 +609,22 @@ export function LeadsListPage() {
         <Upload.Dragger accept=".csv,text/csv" beforeUpload={handleCsvFile} showUploadList={false} disabled={importing}>
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
           <p className="ant-upload-text">Kéo thả hoặc bấm để chọn file CSV</p>
-          <p className="ant-upload-hint">Mỗi dòng hợp lệ sẽ tạo một lead và tự trigger AI scoring.</p>
+          <p className="ant-upload-hint">Email bắt buộc và phân biệt hoa/thường. Số điện thoại phải có đúng 10 chữ số. Dòng trùng điện thoại hoặc email sẽ bị chặn.</p>
         </Upload.Dragger>
+        {importErrors.length > 0 && <Alert type="warning" showIcon className="mt-4"
+          message={`${importErrors.length} dòng bị chặn hoặc lỗi`}
+          description={<div className="max-h-60 overflow-y-auto space-y-1">{importErrors.map((error, index) => <div key={index}>{error}</div>)}</div>} />}
       </Drawer>
 
+      <LeadEnrollmentModal open={!!convertLead} lead={convertLead} onCancel={() => setConvertLead(null)}
+        onSuccess={studentId => { setConvertLead(null); openDetail(`/lms/students/${studentId}?tab=classes`); }} />
       <MarkLostModal
         open={!!lostTargetLead}
         lead={lostTargetLead}
         onCancel={() => setLostTargetLead(null)}
         onSuccess={() => {
           setLostTargetLead(null);
-          fetchLeads();
+          refreshList();
         }}
       />
     </div>

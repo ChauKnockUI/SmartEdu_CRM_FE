@@ -36,11 +36,19 @@ const request = async (endpoint: string, options?: RequestInit) => {
   });
 
   const json = await res.json();
-  if (!res.ok) throw new Error(json.message || 'Request failed');
+  if (!res.ok) throw Object.assign(new Error(json.message || 'Request failed'), {
+    status: res.status,
+    duplicateFields: json.duplicate_fields,
+  });
   return json;
 };
 
 export const leadService = {
+  getEmailConfiguration: async (): Promise<{ data: { available: boolean; from?: string } }> => request('/leads/email-config'),
+
+  sendEmail: async (id: number, data: { to: string; subject: string; text: string; request_id: string }) =>
+    request(`/leads/${id}/emails`, { method: 'POST', body: JSON.stringify(data) }),
+
   getSources: async (): Promise<{ success: boolean; data: LeadSourceOption[] }> => request('/leads/sources'),
 
   getAll: async (params?: Record<string, unknown>) => {
@@ -83,7 +91,7 @@ export const leadService = {
       method: 'DELETE',
     }),
 
-  convert: async (id: number, data?: { email?: string }) =>
+  convert: async (id: number, data?: { email?: string; class_id?: number }) =>
     request(`/leads/${id}/convert`, {
       method: 'POST',
       body: JSON.stringify(data || {}),

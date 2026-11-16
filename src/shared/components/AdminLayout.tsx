@@ -47,12 +47,13 @@ function leafMenuKeys(items: MenuItem[]): string[] {
     ? leafMenuKeys(item.children as MenuItem[]) : item.key ? [String(item.key)] : []);
 }
 
-function getMenuItemsForRole(role: UserRole): MenuItem[] {
+export function getMenuItemsForRole(role: UserRole): MenuItem[] {
   if (role === 'sale') {
     return [
       getItem('Dashboard', '/dashboard', <DashboardOutlined />),
       getItem('CRM', '/crm', <CustomerServiceOutlined />, [
         getItem('Quản lý leads', '/crm/leads', <UserOutlined />),
+        getItem('Học viên phụ trách', '/lms/students', <TeamOutlined />),
       ]),
       getItem('Tài chính', '/finance', <DollarOutlined />, [
         getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
@@ -68,8 +69,9 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('LMS', '/lms', <BookOutlined />, [
         getItem('Lịch dạy', '/lms/myschedule', <CalendarOutlined />),
         getItem('Lớp học', '/lms/classes', <BookOutlined />),
+        getItem('Học viên trong lớp', '/lms/students', <TeamOutlined />),
       ]),
-      getItem('Dropout Risk', '/ai/predictions', <RobotOutlined />),
+      getItem('Cảnh báo bỏ học', '/ai/predictions', <RobotOutlined />),
     ];
   }
 
@@ -79,6 +81,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('LMS', '/lms', <BookOutlined />, [
         getItem('Lịch học của tôi', '/lms/myschedule', <CalendarOutlined />),
         getItem('Lớp học của tôi', '/lms/classes', <BookOutlined />),
+        getItem('Hồ sơ của tôi', '/lms/my-profile', <UserOutlined />),
       ]),
     ];
   }
@@ -104,7 +107,7 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
     ]),
     getItem('AI & Insights', '/ai', <RobotOutlined />, [
       getItem('Models', '/ai/models', <RobotOutlined />),
-      getItem('Dropout Risk', '/ai/predictions', <DashboardOutlined />),
+      getItem('Cảnh báo bỏ học', '/ai/predictions', <DashboardOutlined />),
       getItem('Demo Insights', '/ai/insights', <DashboardOutlined />),
     ]),
     getItem('Cài đặt', '/settings', <SettingOutlined />, [
@@ -120,7 +123,8 @@ export function AdminLayout() {
   const location = useLocation();
   const { user, logout } = useAuth();
   const menuItems = getMenuItemsForRole(user?.role || 'admin');
-  const selectedMenuKey = activeMenuKey(location.pathname, leafMenuKeys(menuItems), (location.state as NavigationContext | null)?.menuKey);
+  const selectedMenuKey = user?.role === 'student' && /^\/lms\/students\/[^/]+\/?$/.test(location.pathname)
+    ? '/lms/my-profile' : activeMenuKey(location.pathname, leafMenuKeys(menuItems), (location.state as NavigationContext | null)?.menuKey);
   const [openMenuKeys, setOpenMenuKeys] = useState<string[]>([]);
   useEffect(() => {
     const parent = menuItems.find(item => item && 'children' in item
@@ -134,7 +138,8 @@ export function AdminLayout() {
   };
 
   const userMenuItems: MenuProps['items'] = [
-    { key: 'profile', icon: <UserOutlined />, label: 'Thông tin tài khoản' },
+    { key: 'profile', icon: <UserOutlined />, label: 'Thông tin tài khoản',
+      ...(user?.role === 'student' ? { onClick: () => navigate('/lms/my-profile') } : {}) },
     { key: 'settings', icon: <SettingOutlined />, label: 'Cài đặt' },
     { key: 'divider-1', type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true, onClick: handleLogout },

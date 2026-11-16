@@ -19,8 +19,9 @@ import {
   Tabs,
   Tag,
   Timeline,
+  Tooltip,
 } from 'antd';
-import { PhoneOutlined, PlusOutlined } from '@ant-design/icons';
+import { MailOutlined, PhoneOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
@@ -31,15 +32,12 @@ import { userService } from '@/services/api/user.service';
 import { LeadConsultationPanel } from './components/LeadConsultationPanel';
 import { MarkLostModal } from './components/MarkLostModal';
 import { getEditableLeadSources, getLeadSourceLabel } from './leadSources';
-
-const statusLabels: Record<string, string> = {
-  new: 'Mới',
-  contacted: 'Đã liên hệ',
-  interested: 'Quan tâm',
-  trial: 'Học thử',
-  enrolled: 'Đã đăng ký',
-  lost: 'Thất bại',
-};
+import { getLeadAssigneeOptions, hasLeadAssignee, canUnassignLead, LEAD_ASSIGNMENT_REQUIRED,
+  leadContactBlockReason, leadConvertBlockReason, leadTransitionBlockReason } from './leadAssignment';
+import { LEAD_STATUSES, LEAD_OPEN_STAGES, LEAD_ACTIONS, LEAD_MESSAGES, LEAD_ACTIVITY_LABELS as activityLabels } from './leadStatus';
+import { LeadEnrollmentModal } from './components/LeadEnrollmentModal';
+import { LeadEmailDrawer } from './components/LeadEmailDrawer';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 
 const occupationLabels: Record<string, string> = {
   student_y1_y2: 'Sinh viên năm 1-2',
@@ -55,15 +53,6 @@ const studyPurposeLabels: Record<string, string> = {
   improve: 'Cải thiện tiếng Anh',
 };
 
-const activityLabels: Record<string, string> = {
-  call: 'Gọi điện',
-  email: 'Email',
-  sms: 'SMS',
-  meeting: 'Tư vấn trực tiếp',
-  note: 'Ghi chú',
-  status_change: 'Cập nhật trạng thái',
-};
-
 const engagementLabels: Record<string, string> = {
   positive_interaction: 'Có phản hồi tích cực',
   interested_need_time: 'Quan tâm, cần thêm thời gian',
@@ -77,7 +66,7 @@ const engagementLabels: Record<string, string> = {
   low: 'Bận, hẹn gọi lại',
 };
 
-const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({ value, label }));
+const statusOptions = LEAD_STATUSES.map(({ value, label }) => ({ value, label }));
 const occupationOptions = Object.entries(occupationLabels).map(([value, label]) => ({ value, label }));
 const studyPurposeOptions = Object.entries(studyPurposeLabels).map(([value, label]) => ({ value, label }));
 
@@ -86,6 +75,8 @@ function formatDate(value?: string | null) {
 }
 
 export function LeadDetailPage() {
+  const { openDetail } = useDetailNavigation();
+  const [convertOpen, setConvertOpen] = useState(false);
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
@@ -103,16 +94,20 @@ export function LeadDetailPage() {
   const [courses, setCourses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
-  const [assignSaleId, setAssignSaleId] = useState<number>();
+  const [assignSaleId, setAssignSaleId] = useState(0);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
   const [form] = Form.useForm();
   const [activityForm] = Form.useForm();
   const activityType = Form.useWatch('type', activityForm);
 
   const canManageLead = user?.role === 'admin' || user?.role === 'sale';
+  const canCare = hasLeadAssignee(lead);
+  const contactBlocked = leadContactBlockReason(lead);
+  const convertBlocked = leadConvertBlockReason(lead);
 
   const fetchDetail = async () => {
     if (!id) return;
@@ -181,6 +176,8 @@ export function LeadDetailPage() {
     setLead(null);
     setActivities([]);
     setLatestActivities([]);
+    setEmailOpen(false);
+    setActivityOpen(false);
     fetchDetail();
     fetchActivities();
     fetchSources();
@@ -200,14 +197,20 @@ export function LeadDetailPage() {
 
   useEffect(() => {
     if (searchParams.get('contact') !== '1' || !lead || String(lead.id) !== id) return;
-    activityForm.setFieldsValue({ type: 'call', engagement_status: 'unknown' });
-    setActivityOpen(true);
+    const reason = leadContactBlockReason(lead);
+    if (!reason) {
+      activityForm.resetFields();
+      activityForm.setFieldsValue({ type: 'call', engagement_status: 'unknown' });
+      setActivityOpen(true);
+    } else message.warning(reason);
     const next = new URLSearchParams(searchParams);
     next.delete('contact');
     setSearchParams(next, { replace: true });
   }, [id, lead?.id, searchParams]);
 
   const openActivity = (type = 'call') => {
+    if (type !== 'note' && contactBlocked) { message.warning(contactBlocked); return; }
+    activityForm.resetFields();
     activityForm.setFieldsValue({ type, engagement_status: 'unknown' });
     setActivityOpen(true);
   };
@@ -216,6 +219,9 @@ export function LeadDetailPage() {
 
   const openEdit = () => {
     form.setFieldsValue({
+      full_name: lead.full_name,
+      phone: lead.phone,
+      email: lead.email,
       source: lead.lead_source,
       occupation: lead.occupation,
       study_purpose: lead.study_purpose,
@@ -229,14 +235,14 @@ export function LeadDetailPage() {
     try {
       setSaving(true);
       await leadService.update(String(lead.id), values);
-      message.success('Đã cập nhật thông tin lead');
+      message.success(values.status ? LEAD_MESSAGES.stageUpdated : LEAD_MESSAGES.updated);
       setEditOpen(false);
       fetchDetail();
       fetchActivities();
       queueRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      message.error('Cập nhật lead thất bại');
+      message.error(err.message || LEAD_MESSAGES.updateFailed);
     } finally {
       setSaving(false);
     }
@@ -244,6 +250,9 @@ export function LeadDetailPage() {
 
   const handleStatusChange = async (status: string) => {
     if (!lead) return;
+    if (saving) return;
+    const reason = leadTransitionBlockReason(lead, status);
+    if (reason) { message.warning(reason); return; }
     if (status === 'lost') { setLostOpen(true); return; }
     if (status === 'enrolled') { handleConvert(); return; }
     await handleUpdate({ status });
@@ -265,78 +274,50 @@ export function LeadDetailPage() {
   };
 
   const handleConvert = async () => {
-    if (!lead.email) {
-      message.warning('Lead cần có email trước khi convert thành học viên.');
-      return;
-    }
+    if (saving) return;
+    if (convertBlocked) { message.warning(convertBlocked); return; }
 
-    Modal.confirm({
-      title: 'Chuyển thành học viên?',
-      content: `${lead.full_name} sẽ được tạo hồ sơ học viên theo quy trình đăng ký hiện tại.`,
-      okText: 'Xác nhận đăng ký', cancelText: 'Hủy',
-      onOk: async () => {
-        setSaving(true);
-        try {
-          await leadService.convert(Number(lead.id));
-          message.success('Đã chuyển thành học viên');
-          fetchDetail(); fetchActivities();
-        } catch (err: any) {
-          message.error(err.message || 'Chuyển học viên thất bại');
-          throw err;
-        } finally { setSaving(false); }
-      },
-    });
-  };
-
-  const handleClaimLead = async () => {
-    if (!user?.id) return;
-    try {
-      setSaving(true);
-      await leadService.update(String(lead.id), { assigned_to: Number(user.id) });
-      message.success('Đã phân công lead cho bạn phụ trách');
-      fetchDetail();
-    } catch (err) {
-      console.error(err);
-      message.error('Phân công lead thất bại');
-    } finally {
-      setSaving(false);
-    }
+    setConvertOpen(true);
   };
 
   const handleAssignLead = async () => {
-    if (!assignSaleId) {
-      message.warning('Chọn sale phụ trách');
+    if (saving) return;
+    if (assignSaleId === (lead.assigned_to ?? 0)) {
+      setAssignOpen(false);
       return;
     }
 
     try {
       setSaving(true);
-      await leadService.update(String(lead.id), { assigned_to: assignSaleId });
-      message.success('Đã phân công lead cho sale phụ trách');
+      await leadService.update(String(lead.id), { assigned_to: assignSaleId === 0 ? null : assignSaleId });
+      message.success(assignSaleId === 0 ? LEAD_MESSAGES.unassigned : LEAD_MESSAGES.assigned);
       setAssignOpen(false);
       fetchDetail();
-    } catch (err) {
+      fetchActivities();
+    } catch (err: any) {
       console.error(err);
-      message.error('Phân công lead thất bại');
+      message.error(err.message || LEAD_MESSAGES.assignFailed);
     } finally {
       setSaving(false);
     }
   };
 
   const handleCreateActivity = async (values: any) => {
+    if (saving) return;
+    if (values.type !== 'note' && contactBlocked) { message.warning(contactBlocked); return; }
     try {
       setSaving(true);
       const isContact = ['call', 'email', 'sms', 'meeting'].includes(values.type);
       await leadService.createActivity(String(lead.id), { ...values, engagement_status: isContact ? values.engagement_status || 'unknown' : undefined });
-      message.success(isContact ? 'Đã ghi nhận liên hệ. Điểm đánh giá sẽ cập nhật sau ít giây.' : 'Đã lưu ghi chú');
+      message.success(isContact ? LEAD_MESSAGES.contactSaved : LEAD_MESSAGES.noteSaved);
       activityForm.resetFields();
       setActivityOpen(false);
       fetchDetail();
       fetchActivities();
       queueRefresh();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      message.error('Không thêm được tương tác');
+      message.error(err.message || LEAD_MESSAGES.contactFailed);
     } finally {
       setSaving(false);
     }
@@ -369,13 +350,15 @@ export function LeadDetailPage() {
               children: <div className="pb-2">
                 <div className="mb-1 flex flex-wrap items-center gap-2">
                   <span className="font-medium text-gray-800">{activityLabels[activity.type] || activity.type}</span>
+                  {activity.email_delivery === 'accepted' && <Tag color="cyan">Dịch vụ đã tiếp nhận</Tag>}
                   {activity.engagement_status && <Tag color={activity.engagement_status === 'rejected' ? 'volcano' : 'blue'}>{engagementLabels[activity.engagement_status] || activity.engagement_status}</Tag>}
                 </div>
                 {activity.content && <p className="whitespace-pre-wrap break-words text-sm leading-6 text-gray-600">{activity.content}</p>}
                 <div className="mt-1 text-xs text-gray-400">{formatDate(activity.createdAt)} · {activity.user?.full_name || 'Không rõ người ghi'}</div>
               </div>,
             }))} /> : <Empty description="Chưa có hoạt động được ghi nhận">
-              {!['enrolled', 'lost'].includes(lead.status) && <Button type="primary" onClick={() => openActivity()}>Ghi nhận liên hệ đầu tiên</Button>}
+              {!['enrolled', 'lost'].includes(lead.status) && <Tooltip title={contactBlocked}><span><Button type="primary" disabled={!!contactBlocked || saving}
+                onClick={() => openActivity()}>{LEAD_ACTIONS.contact}</Button></span></Tooltip>}
             </Empty>}
           </Spin>}
         {activityPagination.total > activityPagination.pageSize && <Pagination size="small" current={activityPagination.current} total={activityPagination.total} pageSize={activityPagination.pageSize} showSizeChanger={false} onChange={page => fetchActivities(page)} />}
@@ -403,7 +386,6 @@ export function LeadDetailPage() {
   return (
     <div>
       <PageHeader
-        title={lead.full_name}
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'CRM' },
@@ -412,31 +394,58 @@ export function LeadDetailPage() {
         ]}
         actions={
           <Space wrap>
-            <Button icon={<PhoneOutlined />} href={lead.phone ? 'tel:' + lead.phone : undefined} disabled={!lead.phone}>Gọi điện</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => openActivity()} disabled={['enrolled', 'lost'].includes(lead.status)}>Ghi nhận liên hệ</Button>
+            <Tooltip title={contactBlocked || 'Mở ứng dụng gọi trên thiết bị. Sau cuộc gọi, dùng Ghi nhận kết quả để lưu lịch sử.'}>
+              <span><Button icon={<PhoneOutlined />} href={!contactBlocked && lead.phone ? 'tel:' + lead.phone : undefined}
+                disabled={!!contactBlocked || !lead.phone}>Gọi điện</Button></span>
+            </Tooltip>
+            <Tooltip title={contactBlocked || (!lead.email ? 'Bổ sung email cho Lead trước khi gửi.' : undefined)}>
+              <span><Button icon={<MailOutlined />} onClick={() => setEmailOpen(true)} disabled={!!contactBlocked || !lead.email || saving}>Soạn email</Button></span>
+            </Tooltip>
+            <Tooltip title={contactBlocked}><span><Button type="primary" icon={<PlusOutlined />} onClick={() => openActivity()}
+              disabled={!!contactBlocked || saving}>{LEAD_ACTIONS.contact}</Button></span></Tooltip>
             <Dropdown trigger={['click']} menu={{ items: [
-              { key: 'email', label: <a href={lead.email ? 'mailto:' + lead.email : undefined}>Soạn email</a>, disabled: !lead.email },
               { key: 'note', label: 'Thêm ghi chú nội bộ', onClick: () => openActivity('note') },
               { key: 'edit', label: 'Chỉnh sửa thông tin', onClick: openEdit },
-              ...(user?.role === 'admin' ? [{ key: 'assign', label: 'Phân công sale', onClick: () => { setAssignSaleId(lead.assignedUser?.id); setAssignOpen(true); } }] : []),
-              ...(user?.role === 'sale' && !lead.assignedUser ? [{ key: 'claim', label: 'Nhận phụ trách', onClick: handleClaimLead }] : []),
-              { key: 'convert', label: 'Chuyển thành học viên', disabled: ['enrolled', 'lost'].includes(lead.status) || !lead.email, onClick: handleConvert },
-              ...(!['enrolled', 'lost'].includes(lead.status) ? [{ key: 'lost', label: 'Đánh dấu thất bại', onClick: () => setLostOpen(true) }] : []),
+              ...(user?.role === 'admin' ? [{ key: 'assign', label: LEAD_ACTIONS.assign, onClick: () => { setAssignSaleId(lead.assigned_to ?? 0); setAssignOpen(true); } }] : []),
+              { key: 'convert', label: <Tooltip title={convertBlocked}><span>{LEAD_ACTIONS.convert}</span></Tooltip>, disabled: !!convertBlocked, onClick: handleConvert },
+              ...(!['enrolled', 'lost'].includes(lead.status) ? [{ key: 'lost', label: LEAD_ACTIONS.lost, onClick: () => setLostOpen(true) }] : []),
             ] }}><Button loading={saving}>Thao tác khác</Button></Dropdown>
           </Space>
         }
       />
 
-      <div className="mb-4">
-        <Space wrap>
+      <div className="flex flex-col gap-5">
+        {lead.student?.id && <Alert type="success" showIcon message="Lead đã được chuyển thành học viên"
+          description={lead.student.classEnrollments?.some((item: any) => ['upcoming', 'ongoing'].includes(item.class?.status))
+            ? 'Học viên đã có lớp đang học hoặc sắp mở.' : 'Học viên chưa có lớp đang học hoặc sắp mở. Mở hồ sơ học viên để tiếp tục xếp lớp.'}
+          action={<Button onClick={() => openDetail(`/lms/students/${lead.student.id}?tab=classes`)}>Hồ sơ học viên</Button>} />}
+        {!canCare && !['enrolled', 'lost'].includes(lead.status) && <div>
+          <Alert type="info" showIcon message={LEAD_ASSIGNMENT_REQUIRED}
+            action={user?.role === 'admin' ? <Button size="small"
+              onClick={() => { setAssignSaleId(lead.assigned_to ?? 0); setAssignOpen(true); }}>Phân công sale</Button> : undefined} />
+        </div>}
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-gray-600">Giai đoạn:</span>
-          <Select value={lead.status} style={{ width: 180 }} options={statusOptions} disabled={lead.status === 'enrolled'} loading={saving} onChange={handleStatusChange} />
-        </Space>
+          <Tooltip title={lead.status === 'enrolled' ? leadTransitionBlockReason(lead, 'new') : undefined}><span>
+            <Select value={lead.status} style={{ width: 180 }} options={statusOptions.map(option => {
+              const reason = leadTransitionBlockReason(lead, option.value);
+              return { ...option, disabled: !!reason, title: reason };
+            })} disabled={lead.status === 'enrolled' || saving} loading={saving} onChange={handleStatusChange} />
+          </span></Tooltip>
+        </div>
+        {lead.status !== 'lost' && <div>
+          <Steps size="small" current={LEAD_OPEN_STAGES.findIndex(stage => stage.value === lead.status)}
+            items={LEAD_OPEN_STAGES.map(stage => ({ title: stage.label }))} />
+        </div>}
+        <div>
+          <LeadConsultationPanel lead={lead} activities={latestActivities} onScore={handleScore} loading={saving} />
+        </div>
+        <div>
+          <Tabs defaultActiveKey="timeline" items={tabs} />
+        </div>
       </div>
-
-      {lead.status !== 'lost' && <Steps className="mb-6" size="small" current={['new', 'contacted', 'interested', 'trial', 'enrolled'].indexOf(lead.status)} items={['Tiếp nhận', 'Liên hệ', 'Quan tâm', 'Học thử', 'Đăng ký'].map(title => ({ title }))} />}
-      <LeadConsultationPanel lead={lead} activities={latestActivities} onScore={handleScore} loading={saving} />
-      <Tabs defaultActiveKey="timeline" items={tabs} />
+      <LeadEnrollmentModal open={convertOpen} lead={lead} onCancel={() => setConvertOpen(false)}
+        onSuccess={studentId => { setConvertOpen(false); openDetail(`/lms/students/${studentId}?tab=classes`); }} />
       <MarkLostModal open={lostOpen} lead={lead} onCancel={() => setLostOpen(false)} onSuccess={() => { setLostOpen(false); fetchDetail(); fetchActivities(); }} />
 
       <Modal
@@ -444,7 +453,7 @@ export function LeadDetailPage() {
         open={assignOpen}
         onCancel={() => setAssignOpen(false)}
         onOk={handleAssignLead}
-        okText="Phân công"
+        okText="Lưu"
         cancelText="Hủy"
         confirmLoading={saving}
       >
@@ -460,16 +469,28 @@ export function LeadDetailPage() {
             onChange={setAssignSaleId}
             showSearch
             optionFilterProp="label"
-            options={sales.map((sale) => ({
-              label: `${sale.full_name} (${sale.email})`,
-              value: sale.id,
-            }))}
+            options={getLeadAssigneeOptions(sales, lead)}
           />
+          {!canUnassignLead(lead) && <div className="text-xs text-gray-500">Lead đang được chăm sóc. Hãy chọn Sale khác để chuyển người phụ trách.</div>}
         </Space>
       </Modal>
 
       <Drawer title="Chỉnh sửa lead" width={520} open={editOpen} onClose={() => setEditOpen(false)} destroyOnClose>
         <Form form={form} layout="vertical" onFinish={handleUpdate}>
+          <Form.Item name="full_name" label="Họ tên"
+            rules={[{ required: true, whitespace: true, message: 'Nhập họ tên' }, { max: 255, message: 'Họ tên tối đa 255 ký tự' }]}>
+            <Input maxLength={255} />
+          </Form.Item>
+          <Form.Item name="phone" label="Số điện thoại"
+            rules={[{ required: true, whitespace: true, message: 'Nhập số điện thoại' },
+              { pattern: /^[0-9]{10}$/, transform: value => value?.trim(), message: 'Số điện thoại phải có đúng 10 chữ số' }]}>
+            <Input inputMode="numeric" />
+          </Form.Item>
+          <Form.Item name="email" label="Email"
+            rules={[{ required: true, whitespace: true, message: 'Nhập email' },
+              { type: 'email', transform: value => value?.trim(), message: 'Email không hợp lệ' }, { max: 255, message: 'Email tối đa 255 ký tự' }]}>
+            <Input maxLength={255} />
+          </Form.Item>
           <Form.Item name="source" label="Nguồn lead" rules={[{ required: true }]}>
             <Select options={getEditableLeadSources(sourceOptions, lead.lead_source)} />
           </Form.Item>
@@ -492,10 +513,17 @@ export function LeadDetailPage() {
         </Form>
       </Drawer>
 
-      <Drawer title="Ghi nhận chăm sóc" width={520} styles={{ wrapper: { maxWidth: '100vw' } }} open={activityOpen} onClose={() => setActivityOpen(false)} destroyOnClose>
+      <LeadEmailDrawer key={lead.id} open={emailOpen} lead={lead} onClose={() => setEmailOpen(false)}
+        onSent={() => { fetchDetail(); fetchActivities(); queueRefresh(); }} />
+
+      <Drawer title="Ghi nhận kết quả chăm sóc" width={520} styles={{ wrapper: { maxWidth: '100vw' } }} open={activityOpen} onClose={() => setActivityOpen(false)} destroyOnClose>
+        <Alert className="mb-4" type="info" showIcon message="Ghi lại hoạt động đã thực hiện"
+          description="Lưu kết quả gọi điện, email/SMS đã gửi bên ngoài hoặc tư vấn trực tiếp. Để gửi email từ CRM, dùng nút Soạn email." />
         <Form form={activityForm} layout="vertical" onFinish={handleCreateActivity}>
           <Form.Item name="type" label="Loại tương tác" rules={[{ required: true }]}>
-            <Select options={Object.entries(activityLabels).filter(([value]) => value !== 'status_change').map(([value, label]) => ({ value, label }))} />
+            <Select options={Object.entries(activityLabels).filter(([value]) => value !== 'status_change').map(([value, label]) => ({ value,
+              label: value === 'email' ? 'Email đã gửi bên ngoài' : value === 'sms' ? 'SMS đã gửi bên ngoài' : label,
+              disabled: value !== 'note' && !!contactBlocked, title: value !== 'note' ? contactBlocked : undefined }))} />
           </Form.Item>
           <Form.Item name="content" label="Nội dung và bước tiếp theo" rules={[{ required: true }]}>
             <Input.TextArea rows={4} placeholder="Nhu cầu của khách, điều còn phân vân và lịch liên hệ đã thống nhất..." />

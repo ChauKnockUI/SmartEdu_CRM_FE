@@ -5,37 +5,13 @@ import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { financeService } from '../../services/api/finance.service';
 import { classService } from '../../services/api/class.service';
+import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as invoiceStatus, isCollectibleInvoice, sumBillingMoney, billingDate } from './billingStatus';
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
 
-const daysUntil = (date?: string) => {
-  if (!date) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(date);
-  target.setHours(0, 0, 0, 0);
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
-};
-
-const invoiceStatus = (invoice: any) => {
-  const remaining = Number(invoice.remaining_amount || 0);
-  const paid = Number(invoice.paid_amount || 0);
-  if (remaining <= 0 || invoice.status === 'paid') return 'paid';
-  const diff = daysUntil(invoice.due_date);
-  if (diff !== null && diff < 0) return 'overdue';
-  if (paid > 0 || invoice.status === 'partial') return 'partial';
-  return 'pending';
-};
-
-const statusMeta: Record<string, { label: string; color: string }> = {
-  pending: { label: 'Chưa thu', color: 'orange' },
-  partial: { label: 'Thu một phần', color: 'blue' },
-  paid: { label: 'Đã thu đủ', color: 'green' },
-  overdue: { label: 'Quá hạn', color: 'red' },
-};
-
 export function InvoicesPage() {
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
@@ -48,10 +24,11 @@ export function InvoicesPage() {
   const loadInvoices = async () => {
     try {
       setLoading(true);
-      const res = await financeService.getInvoices({ limit: 100 });
+      setLoadError('');
+      const res = await financeService.getAllInvoices();
       setInvoices(res.data || []);
     } catch (err: any) {
-      message.error(err.message || 'Không tải được danh sách khoản phải thu');
+      setInvoices([]); setLoadError(err.message || 'Không tải được danh sách khoản phải thu');
     } finally {
       setLoading(false);
     }
@@ -87,7 +64,7 @@ export function InvoicesPage() {
   const rows = useMemo(() => invoices
     .map((invoice) => ({ ...invoice, view_status: invoiceStatus(invoice) }))
     .filter((invoice) => {
-      if (statusFilter === 'active') return invoice.view_status !== 'paid';
+      if (statusFilter === 'active') return isCollectibleInvoice(invoice);
       if (statusFilter === 'all') return true;
       return invoice.view_status === statusFilter;
     })
@@ -102,17 +79,17 @@ export function InvoicesPage() {
       return haystack.includes(query.trim().toLowerCase());
     })
     .sort((a, b) => {
-      const rank = { overdue: 0, partial: 1, pending: 2, paid: 3 } as Record<string, number>;
+      const rank = { overdue: 0, partial: 1, pending: 2, paid: 3, cancelled: 4, refunded: 5, unknown: 6 } as Record<string, number>;
       const priority = rank[a.view_status] - rank[b.view_status];
       if (priority !== 0) return priority;
       return new Date(a.due_date || '2999-01-01').getTime() - new Date(b.due_date || '2999-01-01').getTime();
     }), [invoices, query, statusFilter]);
 
   const summary = useMemo(() => {
-    const active = invoices.filter((item) => invoiceStatus(item) !== 'paid');
+    const active = invoices.filter(isCollectibleInvoice);
     return {
-      activeAmount: active.reduce((sum, item) => sum + Number(item.remaining_amount || 0), 0),
-      overdueAmount: active.filter((item) => invoiceStatus(item) === 'overdue').reduce((sum, item) => sum + Number(item.remaining_amount || 0), 0),
+      activeAmount: sumBillingMoney(active, 'remaining_amount'),
+      overdueAmount: sumBillingMoney(active.filter(item => invoiceStatus(item) === 'overdue'), 'remaining_amount'),
       partialCount: active.filter((item) => invoiceStatus(item) === 'partial').length,
       paidCount: invoices.filter((item) => invoiceStatus(item) === 'paid').length,
     };
@@ -171,8 +148,7 @@ export function InvoicesPage() {
       render: (_, record) => {
         if (record.view_status === 'overdue') return <Tag color="red" icon={<WarningOutlined />}>Quá hạn</Tag>;
         if (record.view_status === 'partial') return <Tag color="blue" icon={<ClockCircleOutlined />}>Còn thiếu</Tag>;
-        if (record.view_status === 'paid') return <Tag color="green">Đã thu</Tag>;
-        return <Tag color="orange">Chưa thu</Tag>;
+        return <BillingStatusTag status={record.view_status} />;
       },
     },
     {
@@ -195,11 +171,11 @@ export function InvoicesPage() {
         </Space>
       ),
     },
-    { title: 'Phải thu', dataIndex: 'total_amount', align: 'right', render: money },
+    { title: 'Phải thu sau giảm giá', dataIndex: 'payable_amount', align: 'right', render: money },
     { title: 'Đã thu', dataIndex: 'paid_amount', align: 'right', render: money },
     { title: 'Còn lại', dataIndex: 'remaining_amount', align: 'right', render: (value) => <Typography.Text strong>{money(value)}</Typography.Text> },
-    { title: 'Hạn thu', dataIndex: 'due_date', render: (value) => value ? new Date(value).toLocaleDateString('vi-VN') : '-' },
-    { title: 'Trạng thái', render: (_, record) => <Tag color={statusMeta[record.view_status].color}>{statusMeta[record.view_status].label}</Tag> },
+    { title: 'Hạn thu', dataIndex: 'due_date', render: billingDate },
+    { title: 'Trạng thái', render: (_, record) => <BillingStatusTag status={record.view_status} /> },
   ];
 
   return (
@@ -219,8 +195,9 @@ export function InvoicesPage() {
         }
       />
 
+      {loadError && <Alert className="mb-4" type="error" showIcon message={loadError} />}
       <Card>
-        <Row gutter={16} className="mb-4">
+        {!loadError && <Row gutter={16} className="mb-4">
           <Col xs={24} sm={12} lg={6}>
             <Card size="small"><Statistic title="Đang phải thu" value={summary.activeAmount} formatter={(value) => money(Number(value))} /></Card>
           </Col>
@@ -228,12 +205,12 @@ export function InvoicesPage() {
             <Card size="small"><Statistic title="Quá hạn" value={summary.overdueAmount} valueStyle={{ color: '#cf1322' }} formatter={(value) => money(Number(value))} /></Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="Thu một phần" value={summary.partialCount} /></Card>
+            <Card size="small"><Statistic title={statusMeta.partial.label} value={summary.partialCount} /></Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="Đã thu đủ" value={summary.paidCount} /></Card>
+            <Card size="small"><Statistic title={statusMeta.paid.label} value={summary.paidCount} /></Card>
           </Col>
-        </Row>
+        </Row>}
 
         <Space className="mb-4 w-full" size={12} wrap>
           <Input
@@ -251,9 +228,11 @@ export function InvoicesPage() {
             options={[
               { label: 'Đang phải thu', value: 'active' },
               { label: 'Quá hạn', value: 'overdue' },
-              { label: 'Thu một phần', value: 'partial' },
-              { label: 'Chưa thu', value: 'pending' },
-              { label: 'Đã thu đủ', value: 'paid' },
+              { label: statusMeta.partial.label, value: 'partial' },
+              { label: statusMeta.pending.label, value: 'pending' },
+              { label: statusMeta.paid.label, value: 'paid' },
+              { label: statusMeta.cancelled.label, value: 'cancelled' },
+              { label: statusMeta.refunded.label, value: 'refunded' },
               { label: 'Tất cả', value: 'all' },
             ]}
           />
@@ -264,6 +243,7 @@ export function InvoicesPage() {
           rowKey="id"
           columns={columns}
           dataSource={rows}
+          locale={{ emptyText: loadError ? 'Chưa tải được khoản phải thu' : 'Không có khoản phải thu phù hợp' }}
           scroll={{ x: 1120 }}
           pagination={{ pageSize: 12, showTotal: (total) => `${total} khoản phải thu` }}
         />

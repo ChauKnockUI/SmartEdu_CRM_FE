@@ -19,9 +19,11 @@ export type DashboardActivity = {
   actor: string;
   text: string;
   time: string;
+  action?: string;
 };
 export type DashboardOverview = {
   role: DashboardRole;
+  links?: Record<string, string>;
   kpis: Record<string, number>;
   charts?: {
     revenueLast6Months?: Array<{ month: string; revenue: number }>;

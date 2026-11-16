@@ -1,36 +1,15 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Card, Col, Empty, Progress, Row, Select, Space, Table } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
-import { leadService, type LeadSourceOption } from '@/services/api/lead.service';
+import { Alert, Card, Col, Empty, Progress, Row, Table } from 'antd';
+import type { LeadSourceOption } from '@/services/api/lead.service';
 import { getLeadSourceLabel } from '../leadSources';
-import { LeadOverviewStats } from './LeadOverviewStats';
 
 interface LeadFunnelAnalyticsProps {
   sourceOptions: LeadSourceOption[];
-  courses: any[];
-  sales: any[];
+  data: any;
+  loading: boolean;
   userRole?: string;
 }
 
-export function LeadFunnelAnalytics({ sourceOptions, courses, sales, userRole }: LeadFunnelAnalyticsProps) {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<any>(null);
-  const [error, setError] = useState('');
-  const [filters, setFilters] = useState<Record<string, any>>({});
-  const fetchReport = async () => {
-    setLoading(true);
-    try {
-      const res = await leadService.getFunnel(filters);
-      setData(res.data);
-      setError('');
-    } catch (err: any) {
-      setError(err.message || 'Không tải được báo cáo');
-    } finally {
-      setLoading(false);
-    }
-  };
-  useEffect(() => { fetchReport(); }, [filters, userRole]);
-
+export function LeadFunnelAnalytics({ sourceOptions, data, loading, userRole }: LeadFunnelAnalyticsProps) {
   const summary = data?.summary || {};
   const stages = data?.stages || [];
   const sources = data?.sourcePerformance || [];
@@ -43,16 +22,6 @@ export function LeadFunnelAnalytics({ sourceOptions, courses, sales, userRole }:
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap justify-between gap-3">
-        <Space wrap>
-          <Select aria-label="Lọc báo cáo theo khóa học" placeholder="Tất cả khóa học" style={{ width: 185 }} allowClear value={filters.course_id} options={courses.map(c => ({ value: c.id, label: c.name }))} onChange={course_id => setFilters(current => ({ ...current, course_id }))} />
-          <Select aria-label="Lọc báo cáo theo nguồn" placeholder="Tất cả nguồn lead" style={{ width: 170 }} allowClear value={filters.source} options={sourceOptions} onChange={source => setFilters(current => ({ ...current, source }))} />
-          {userRole === 'admin' && <Select aria-label="Lọc báo cáo theo sale" placeholder="Tất cả sale" style={{ width: 170 }} allowClear value={filters.assigned_to} options={sales.map(s => ({ value: s.id, label: s.full_name }))} onChange={assigned_to => setFilters(current => ({ ...current, assigned_to }))} />}
-        </Space>
-        <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchReport}>Tải lại</Button>
-      </div>
-      {error && <Alert type="error" showIcon message={error} description={data ? 'Đang hiển thị lần tải thành công trước đó.' : undefined} action={<Button size="small" onClick={fetchReport}>Thử lại</Button>} />}
-      <LeadOverviewStats data={data} loading={loading} manager={userRole === 'admin'} />
       {data && <Alert type="info" showIcon message={advice} />}
       <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>

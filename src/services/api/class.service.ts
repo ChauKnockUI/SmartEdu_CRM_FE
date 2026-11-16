@@ -2,6 +2,11 @@ import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
 
+export interface ClassFilterOptions {
+  courses: { id: number; name: string }[];
+  teachers: { id: number; full_name: string }[];
+}
+
 const getAuthHeader = () => {
   const token = localStorage.getItem('token');
 
@@ -13,6 +18,18 @@ const getAuthHeader = () => {
 };
 
 export const classService = {
+  getFilterOptions: async (): Promise<{ data: ClassFilterOptions }> => {
+    const res = await fetch(`${config.baseURL}/classes/filter-options`, { headers: getAuthHeader() });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Không tải được bộ lọc lớp học');
+    return json;
+  },
+  getDropoutAlerts: async (classId?: number) => {
+    const res = await fetch(`${config.baseURL}/classes/dropout-alerts${classId ? `?class_id=${classId}` : ''}`, { headers: getAuthHeader() });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Không tải được cảnh báo bỏ học');
+    return json;
+  },
   getAll: async (params?: {
     page?: number;
     limit?: number;
@@ -20,11 +37,15 @@ export const classService = {
     status?: string;
     course_id?: number;
     teacher_id?: number;
+    unassigned_teacher?: boolean;
     room_id?: number;
   }) => {
-    const query = new URLSearchParams(params as any).toString();
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+    });
 
-    const res = await fetch(`${config.baseURL}/classes?${query}`, {
+    const res = await fetch(`${config.baseURL}/classes?${query.toString()}`, {
       headers: getAuthHeader(),
     });
 

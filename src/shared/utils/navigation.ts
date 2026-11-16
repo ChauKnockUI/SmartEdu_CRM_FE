@@ -1,6 +1,7 @@
 export interface NavigationContext { from?: string; menuKey?: string; classId?: number }
 
 export const SECTION_PATHS = ['/dashboard', '/crm/leads', '/lms/students', '/lms/teachers', '/lms/courses',
+  '/lms/my-profile',
   '/lms/rooms', '/lms/classes', '/lms/schedule', '/lms/myschedule', '/lms/scheduling',
   '/finance/invoices', '/finance/payments', '/finance/debts', '/ai/models', '/ai/predictions', '/ai/insights', '/settings/users'];
 

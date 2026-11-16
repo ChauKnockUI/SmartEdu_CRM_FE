@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   Row,
@@ -15,37 +15,27 @@ import {
   InputNumber,
   Empty,
   Spin,
+  Alert,
+  Pagination,
+  Space,
 } from 'antd';
 import {
   PlusOutlined,
   TeamOutlined,
   CalendarOutlined,
   UserOutlined,
+  BookOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { PageHeader } from '../../shared/components/PageHeader';
-import { useNavigate } from 'react-router';
-import { classService } from '@/services/api/class.service';
-import { courseService } from '@/services/api/course.service';
+import { useSearchParams } from 'react-router';
+import { classService, type ClassFilterOptions } from '@/services/api/class.service';
 import { useAuth } from '../../shared/contexts/AuthContext';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { CLASS_STATUSES, getClassStatus, classPageSizes, readClassLocation, writeClassLocation, classQueryParams, type ClassListView } from './classFilters';
 
 type Class = any;
-
-const statusColors: any = {
-  upcoming: 'blue',
-  ongoing: 'green',
-  completed: 'default',
-  cancelled: 'red',
-  active: 'green',
-};
-
-const statusLabels: any = {
-  upcoming: 'Sắp khai giảng',
-  ongoing: 'Đang học',
-  completed: 'Đã kết thúc',
-  cancelled: 'Đã hủy',
-  active: 'Đang học',
-};
 
 const dayMap: Record<string, string> = {
   '0': 'CN',
@@ -55,14 +45,6 @@ const dayMap: Record<string, string> = {
   '4': 'Thứ 5',
   '5': 'Thứ 6',
   '6': 'Thứ 7',
-};
-
-const getArrayData = (res: any) => {
-  if (Array.isArray(res)) return res;
-  if (Array.isArray(res?.data)) return res.data;
-  if (Array.isArray(res?.data?.data)) return res.data.data;
-  if (Array.isArray(res?.classes)) return res.classes;
-  return [];
 };
 
 const formatTimeValue = (value?: string | Date | null) => {
@@ -79,7 +61,10 @@ const formatTimeValue = (value?: string | Date | null) => {
 };
 
 export function ClassesPage() {
-  const navigate = useNavigate();
+  const { openDetail } = useDetailNavigation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = useMemo(() => readClassLocation(searchParams), [searchParams]);
+  const [searchDraft, setSearchDraft] = useState(view.search);
   const { user } = useAuth();
   const role = user?.role;
 
@@ -89,43 +74,72 @@ export function ClassesPage() {
 
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [total, setTotal] = useState(0);
+  const listRequest = useRef(0);
+  const optionsRequest = useRef(0);
 
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
-  const [courses, setCourses] = useState<any[]>([]);
+  const [options, setOptions] = useState<ClassFilterOptions>({ courses: [], teachers: [] });
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const [optionsError, setOptionsError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const createBusy = useRef(false);
+  const courses = options.courses;
+  const hasFilters = !!(view.search || view.status || view.courseId || view.teacherId || view.unassignedTeacher);
+  const updateView = (patch: Partial<ClassListView>, resetPage = true) =>
+    setSearchParams(writeClassLocation({ ...view, ...patch, ...(resetPage ? { page: 1 } : {}) }));
 
   const fetchClasses = async () => {
+    const request = ++listRequest.current;
+    let changingPage = false;
     try {
       setLoading(true);
-
-      const res = isAdmin
-        ? await classService.getAll()
-        : await classService.getMyClasses();
-
-      setClasses(getArrayData(res));
+      setLoadError('');
+      const res = await classService.getAll(classQueryParams(view));
+      if (request !== listRequest.current) return;
+      const count = res.pagination?.total || 0;
+      const lastPage = Math.max(1, Math.ceil(count / view.pageSize));
+      if (view.page > lastPage) {
+        changingPage = true;
+        setSearchParams(writeClassLocation({ ...view, page: lastPage }), { replace: true });
+        return;
+      }
+      setClasses(res.data || []);
+      setTotal(count);
     } catch (err: any) {
-      message.error(err.message || 'Lỗi tải lớp học');
+      if (request === listRequest.current) {
+        setClasses([]); setTotal(0);
+        setLoadError(err.message || 'Không tải được danh sách lớp học');
+      }
     } finally {
-      setLoading(false);
+      if (request === listRequest.current && !changingPage) setLoading(false);
     }
   };
 
-  const fetchCourses = async () => {
+  const fetchOptions = async () => {
+    const request = ++optionsRequest.current;
+    setOptionsLoading(true); setOptionsError('');
     try {
-      const res = await courseService.getAll();
-      setCourses(getArrayData(res));
-    } catch {
-      setCourses([]);
+      const res = await classService.getFilterOptions();
+      if (request === optionsRequest.current) setOptions(res.data);
+    } catch (err: any) {
+      if (request === optionsRequest.current) setOptionsError(err.message || 'Không tải được bộ lọc lớp học');
+    } finally {
+      if (request === optionsRequest.current) setOptionsLoading(false);
     }
   };
 
   useEffect(() => {
     fetchClasses();
-
-    if (isAdmin) {
-      fetchCourses();
-    }
-  }, [role]);
+    return () => { listRequest.current++; };
+  }, [searchParams, user?.id, role]);
+  useEffect(() => {
+    setOptions({ courses: [], teachers: [] }); fetchOptions();
+    return () => { optionsRequest.current++; };
+  }, [user?.id, role]);
+  useEffect(() => { setSearchDraft(view.search); }, [view.search]);
 
   const parseDbField = <T,>(val: any): T[] => {
     if (Array.isArray(val)) return val;
@@ -168,9 +182,10 @@ export function ClassesPage() {
     dateStr ? dayjs(dateStr).format('DD/MM/YYYY') : '–';
 
   const handleCreate = async () => {
+    if (createBusy.current) return;
+    createBusy.current = true; setCreating(true);
     try {
       const v = await form.validateFields();
-
       await classService.create({
         name: v.name,
         course_id: v.course_id,
@@ -184,41 +199,84 @@ export function ClassesPage() {
         max_students: v.max_students,
       });
 
-      message.success('Tạo lớp thành công');
+      message.success(hasFilters ? 'Tạo lớp thành công. Danh sách vẫn áp dụng bộ lọc đã chọn.' : 'Tạo lớp thành công');
       setOpen(false);
       form.resetFields();
-      fetchClasses();
+      fetchOptions();
+      if (view.page !== 1) updateView({ page: 1 }, false);
+      else fetchClasses();
     } catch (err: any) {
-      message.error(err.message || 'Tạo thất bại');
+      if (!err.errorFields) message.error(err.message || 'Tạo thất bại');
+    } finally {
+      createBusy.current = false; setCreating(false);
     }
   };
 
   const pageTitle = isAdmin
     ? 'Quản lý Lớp học'
     : isTeacher
-      ? 'Lớp đang dạy'
+      ? 'Lớp phụ trách'
       : isStudent
-        ? 'Lớp đang học'
-        : 'Lớp học';
+        ? 'Lớp của tôi'
+        : 'Lớp có học viên phụ trách';
+
+  const courseOptions = courses.map(item => ({ value: item.id, label: item.name }));
+  if (view.courseId && !courses.some(item => item.id === view.courseId)) courseOptions.push({
+    value: view.courseId, label: 'Khóa học đang chọn',
+  });
+  const teacherOptions: { value: number | string; label: string }[] = [
+    ...(!isTeacher || view.unassignedTeacher ? [{ value: 'unassigned', label: 'Chưa phân công giáo viên' }] : []),
+    ...options.teachers.map(item => ({ value: item.id, label: item.full_name })),
+  ];
+  if (view.teacherId && !options.teachers.some(item => item.id === view.teacherId)) teacherOptions.push({
+    value: view.teacherId, label: 'Giáo viên đang chọn',
+  });
 
   return (
     <div>
       <PageHeader
         title={pageTitle}
-        actions={
-          isAdmin ? (
+        actions={<Space wrap>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => { fetchClasses(); fetchOptions(); }}>Tải lại</Button>
+          {isAdmin && (
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={() => setOpen(true)}
+              disabled={optionsLoading || !!optionsError || !courses.length}
+              onClick={() => { form.resetFields(); form.setFieldsValue({ course_id: view.courseId }); setOpen(true); }}
             >
               Tạo lớp học
             </Button>
-          ) : null
-        }
+          )}
+        </Space>}
       />
 
-      {loading ? (
+      <Card className="mb-4" size="small">
+        <Space wrap size={[12, 12]}>
+          <Input.Search aria-label="Tìm theo tên lớp" placeholder="Tìm theo tên lớp" allowClear maxLength={200}
+            value={searchDraft} style={{ width: 260 }} onChange={event => setSearchDraft(event.target.value)}
+            onSearch={value => updateView({ search: value.trim() })} />
+          <Select aria-label="Lọc theo khóa học" placeholder="Khóa học" allowClear showSearch optionFilterProp="label"
+            style={{ width: 220 }} value={view.courseId} options={courseOptions} loading={optionsLoading}
+            onChange={courseId => updateView({ courseId })} />
+          <Select aria-label="Lọc theo trạng thái lớp" placeholder="Trạng thái lớp" allowClear style={{ width: 180 }}
+            value={view.status} options={CLASS_STATUSES.map(({ value, label }) => ({ value, label }))}
+            onChange={status => updateView({ status })} />
+          <Select aria-label="Lọc theo giáo viên" placeholder="Giáo viên phụ trách" allowClear showSearch optionFilterProp="label"
+            style={{ width: 250 }} value={view.unassignedTeacher ? 'unassigned' : view.teacherId}
+            options={teacherOptions} loading={optionsLoading}
+            onChange={value => updateView({ teacherId: typeof value === 'number' ? value : undefined, unassignedTeacher: value === 'unassigned' })} />
+          {hasFilters && <Button type="link" onClick={() => {
+            setSearchDraft(''); setSearchParams(writeClassLocation({ ...readClassLocation(new URLSearchParams()), pageSize: view.pageSize }));
+          }}>Xóa bộ lọc</Button>}
+        </Space>
+        {!loadError && <div className="mt-3 text-sm text-gray-500">{loading ? 'Đang tải lớp học...' : `Tổng ${total} lớp${hasFilters ? ' phù hợp bộ lọc' : ''}`}</div>}
+      </Card>
+
+      {optionsError && <Alert className="mb-4" type="warning" showIcon message={optionsError}
+        action={<Button onClick={fetchOptions}>Thử lại bộ lọc</Button>} />}
+
+      {loadError ? <Alert type="error" showIcon message={loadError} action={<Button onClick={fetchClasses}>Thử lại</Button>} /> : loading ? (
         <div className="flex justify-center py-16">
           <Spin size="large" />
         </div>
@@ -226,11 +284,11 @@ export function ClassesPage() {
         <Card>
           <Empty
             description={
-              isTeacher
+              hasFilters ? 'Không có lớp phù hợp bộ lọc đã chọn' : isTeacher
                 ? 'Bạn chưa được gán lớp dạy nào'
                 : isStudent
                   ? 'Bạn chưa được ghi danh vào lớp nào'
-                  : 'Chưa có lớp học'
+                  : 'Chưa có lớp học trong phạm vi phụ trách'
             }
           />
         </Card>
@@ -241,31 +299,32 @@ export function ClassesPage() {
               <Card
                 hoverable
                 loading={loading}
-                onClick={() => navigate(`/lms/classes/${cls.id}`)}
+                onClick={() => openDetail(`/lms/classes/${cls.id}`)}
                 title={
                   <div className="flex justify-between gap-2">
-                    <span className="font-semibold">{cls.name}</span>
-                    <Tag color={statusColors[cls.status] || 'blue'}>
-                      {statusLabels[cls.status] || cls.status || 'Đang học'}
+                    <span className="min-w-0 break-words font-semibold">{cls.name}</span>
+                    <Tag className="shrink-0 self-start" color={getClassStatus(cls.status).color}>
+                      {getClassStatus(cls.status).label}
                     </Tag>
                   </div>
                 }
               >
                 <div className="space-y-3">
                   <div className="flex items-center text-gray-600">
+                    <BookOutlined className="mr-2" />
+                    {cls.course?.name || 'Chưa gắn khóa học'}
+                  </div>
+                  <div className="flex items-center text-gray-600">
                     <UserOutlined className="mr-2" />
                     {cls.teacher?.full_name ||
                       cls.teacher?.name ||
                       cls.teacherName ||
-                      'Chưa gán'}
+                      'Chưa phân công giáo viên'}
                   </div>
 
                   <div className="flex items-center text-gray-600">
                     <TeamOutlined className="mr-2" />
-                    {cls._count?.classEnrollments ||
-                      cls.classEnrollments?.length ||
-                      cls.enrollments?.length ||
-                      0}{' '}
+                    {cls._count?.classEnrollments ?? 0}{cls.max_students > 0 ? `/${cls.max_students}` : ''}{' '}
                     học viên
                   </div>
 
@@ -291,7 +350,7 @@ export function ClassesPage() {
                     className="px-0"
                     onClick={(e) => {
                       e.stopPropagation();
-                      navigate(`/lms/classes/${cls.id}`);
+                      openDetail(`/lms/classes/${cls.id}`);
                     }}
                   >
                     Chi tiết lớp
@@ -303,11 +362,16 @@ export function ClassesPage() {
         </Row>
       )}
 
+      {!loadError && !loading && total > 0 && <Pagination className="mt-5" current={view.page} pageSize={view.pageSize}
+        total={total} showSizeChanger pageSizeOptions={classPageSizes} showTotal={count => `Tổng ${count} lớp`}
+        onChange={(page, pageSize) => updateView({ page: pageSize === view.pageSize ? page : 1, pageSize }, false)} />}
+
       <Modal
         title="Tạo lớp học"
         open={open}
         onOk={handleCreate}
-        onCancel={() => setOpen(false)}
+        confirmLoading={creating}
+        onCancel={() => { if (!createBusy.current) setOpen(false); }}
       >
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="Tên lớp" rules={[{ required: true }]}>
@@ -320,6 +384,7 @@ export function ClassesPage() {
             rules={[{ required: true }]}
           >
             <Select
+              showSearch optionFilterProp="label"
               options={courses.map((c) => ({
                 label: c.name,
                 value: c.id,

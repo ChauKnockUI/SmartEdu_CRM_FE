@@ -15,7 +15,7 @@ export function LeadConsultationPanel({ lead, activities, onScore, loading }: {
     : basis === 'crm_history' ? 'Thông tin lead và lịch sử chăm sóc đã ghi nhận.'
     : 'Cần cập nhật đánh giá để xác định dữ liệu đang dùng.';
   return (
-    <Row gutter={[16, 16]} className="mb-4">
+    <Row gutter={[16, 16]}>
       <Col xs={24} xl={15}>
         <Card className="h-full" title="Việc nên làm tiếp theo">
           <h3 className="mb-2 text-base font-semibold text-gray-900">{guidance.title}</h3>

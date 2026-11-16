@@ -9,17 +9,22 @@ import {
   FileTextOutlined,
   PhoneOutlined,
   RiseOutlined,
+  ReloadOutlined,
   TeamOutlined,
   UserAddOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import { CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import dayjs from 'dayjs';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { dashboardService, type DashboardOverview } from '../../services/api/dashboard.service';
 import { leadService } from '../../services/api/lead.service';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { getLeadStatus } from '../crm/leadStatus';
+import { RiskEstimate, SupportPriority, riskTime } from '../../shared/components/DropoutRisk';
+import { BillingStatusTag } from '../finance/billingStatus';
 
 const COLORS = ['#1677ff', '#13c2c2', '#faad14', '#ff7a45', '#722ed1'];
 const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
@@ -57,6 +62,8 @@ function KpiCard({
   suffix,
   color,
   currency,
+  to,
+  note,
 }: {
   title: string;
   value: number;
@@ -64,9 +71,10 @@ function KpiCard({
   suffix?: ReactNode;
   color: string;
   currency?: boolean;
+  to?: string;
+  note?: string;
 }) {
-  return (
-    <Col xs={24} sm={12} lg={6}>
+  const card = (
       <Card styles={{ body: { padding: 16 } }}>
         <Statistic
           title={<span className="text-gray-500">{title}</span>}
@@ -76,9 +84,36 @@ function KpiCard({
           formatter={currency ? (current) => formatCurrency(Number(current)) : undefined}
           valueStyle={{ color, fontSize: currency ? 22 : 24, lineHeight: 1.2 }}
         />
+        {note && <div className="mt-2 text-xs text-gray-500">{note}</div>}
       </Card>
+  );
+  return (
+    <Col xs={24} sm={12} lg={6}>
+      {to ? <Link to={to} className="block" aria-label={`Xem ${title}`}>{card}</Link> : card}
     </Col>
   );
+}
+
+export function LeadStatusSummary({ data, error }: { data: any; error?: string | null }) {
+  if (error) return <Alert type="warning" showIcon message="Chưa tải được dữ liệu Lead" description="Vui lòng bấm Tải lại để thử lại." />;
+  if (!data?.stages?.length) return <EmptyState text="Chưa có dữ liệu Lead" />;
+  const summary = data.summary || {};
+  const rate = summary.totalLeads ? Math.round(summary.enrolledCount / summary.totalLeads * 1000) / 10 : 0;
+  return <div className="space-y-2.5">
+    <p className="text-xs text-gray-500">Phân bố theo trạng thái hiện tại, không phải lịch sử chuyển bước.</p>
+    {data.stages.map((stage: any) => <div key={stage.stage}>
+      <div className="flex justify-between text-xs text-gray-700">
+        <span className="font-medium">{stage.label}</span>
+        <span className="font-semibold text-gray-900">{stage.count} lead ({stage.percentage}%)</span>
+      </div>
+      <Progress percent={stage.percentage} strokeColor={stage.color} showInfo={false} size={['100%', 8]} />
+    </div>)}
+    <div className="flex flex-wrap justify-between gap-3 border-t border-gray-100 pt-2 text-xs text-gray-500">
+      <span>Giá trị khóa quan tâm: <strong className="text-blue-600">{formatCompactMoney(summary.activePipelineValue || 0)}đ</strong></span>
+      <span>Tỷ lệ đăng ký: <strong className="text-emerald-600">{rate}%</strong></span>
+    </div>
+    <p className="text-xs text-gray-500">Giá trị khóa quan tâm chưa phải doanh thu đã thu. Tỷ lệ đăng ký = Đã đăng ký / tổng Lead.</p>
+  </div>;
 }
 
 function AlertIcon({ type }: { type?: string }) {
@@ -90,14 +125,19 @@ export function DashboardPage() {
   const { user } = useAuth();
   const role = user?.role || 'admin';
   const navigate = useNavigate();
+  const { openDetail } = useDetailNavigation();
   const [overview, setOverview] = useState<DashboardOverview | null>(null);
   const [funnelData, setFunnelData] = useState<any>(null);
+  const [funnelError, setFunnelError] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     setLoading(true);
+    setFunnelData(null);
+    setFunnelError(null);
 
     dashboardService.getOverview()
       .then((data) => {
@@ -122,13 +162,13 @@ export function DashboardPage() {
             setFunnelData(res.data);
           }
         })
-        .catch(() => {});
+        .catch(() => { if (mounted) setFunnelError('Không tải được dữ liệu Lead'); });
     }
 
     return () => {
       mounted = false;
     };
-  }, [role]);
+  }, [role, user?.id, revision]);
 
   const data = useMemo(() => overview || emptyOverview(role), [overview, role]);
   const kpis = data.kpis || {};
@@ -155,10 +195,11 @@ export function DashboardPage() {
 
       {data.role === 'admin' && (
         <>
-          <PageHeader title={`Chào mừng, ${user?.name || 'Admin'}`} subtitle="Tổng quan vận hành SmartEdu CRM" />
+          <PageHeader title={`Chào mừng, ${user?.name || 'Admin'}`} subtitle="Tổng quan vận hành SmartEdu CRM"
+            actions={<Button icon={<ReloadOutlined />} onClick={() => setRevision(value => value + 1)}>Tải lại</Button>} />
           <Row gutter={[16, 16]}>
-            <KpiCard title="Lead mới trong tháng" value={kpis.newLeads || 0} prefix={<UserAddOutlined />} color="#3f8600" />
-            <KpiCard title="Tỉ lệ chuyển đổi" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" color="#cf1322" />
+            <KpiCard title="Lead mới trong tháng" value={kpis.newLeads || 0} prefix={<UserAddOutlined />} color="#3f8600" to={data.links?.newLeads} note="Theo ngày tạo, bao gồm mọi trạng thái" />
+            <KpiCard title="Tỷ lệ đăng ký" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" color="#cf1322" to={data.links?.conversionRate} note="Đã đăng ký / tổng Lead" />
             <KpiCard title="Học viên đang học" value={kpis.activeStudents || 0} prefix={<TeamOutlined />} color="#1677ff" />
             <KpiCard title="Doanh thu tháng" value={kpis.monthRevenue || 0} prefix={<DollarOutlined />} color="#52c41a" currency />
           </Row>
@@ -183,46 +224,14 @@ export function DashboardPage() {
             </Col>
             <Col xs={24} lg={12}>
               <DashboardCard
-                title="Phễu chuyển đổi khách hàng"
+                title="Phân bố trạng thái Lead"
                 extra={
-                  <Button type="link" onClick={() => navigate('/crm/leads')}>
+                  <Button type="link" onClick={() => navigate('/crm/leads?tab=funnel')}>
                     Xem chi tiết
                   </Button>
                 }
               >
-                {funnelData?.progressionFunnel?.length ? (
-                  <div className="space-y-2.5">
-                    {funnelData.progressionFunnel.map((step: any) => (
-                      <div key={step.step}>
-                        <div className="flex justify-between text-xs text-gray-700">
-                          <span className="font-medium">{step.step}</span>
-                          <span className="font-semibold text-gray-900">
-                            {step.count} lead ({step.percentOfTotal}%)
-                          </span>
-                        </div>
-                        <Progress
-                          percent={step.percentOfTotal}
-                          strokeColor={step.color}
-                          showInfo={false}
-                          size={['100%', 8]}
-                        />
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
-                      <span className="text-gray-500">
-                        Pipeline: <strong className="text-blue-600">{formatCompactMoney(funnelData.summary?.activePipelineValue || 0)}đ</strong>
-                      </span>
-                      <span className="text-gray-500">
-                        Kỳ vọng AI: <strong className="text-purple-600">{formatCompactMoney(funnelData.summary?.weightedPipelineValue || 0)}đ</strong>
-                      </span>
-                      <span className="text-gray-500">
-                        Win rate: <strong className="text-emerald-600">{funnelData.summary?.winRate || 0}%</strong>
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <EmptyState text="Chưa có dữ liệu phễu" />
-                )}
+                <LeadStatusSummary data={funnelData} error={funnelError} />
               </DashboardCard>
             </Col>
           </Row>
@@ -264,7 +273,8 @@ export function DashboardPage() {
             <Col xs={24}>
               <DashboardCard title="Hoạt động gần đây">
                 {data.activities?.length ? (
-                  <Timeline items={data.activities.map((item) => ({ children: <div><strong>{item.actor}</strong> {item.text} - {formatTime(item.time)}</div> }))} />
+                  <Timeline items={data.activities.map((item) => ({ children: <div><strong>{item.actor}</strong> {item.text} - {formatTime(item.time)}
+                    {item.action && <Button type="link" size="small" onClick={() => openDetail(item.action!)}>Xem Lead</Button>}</div> }))} />
                 ) : (
                   <EmptyState text="Chưa có hoạt động gần đây" />
                 )}
@@ -276,24 +286,26 @@ export function DashboardPage() {
 
       {data.role === 'sale' && (
         <>
-          <PageHeader title={`Chào ${user?.name || 'Sale'}`} subtitle="Theo dõi lead, follow-up và công nợ cần xử lý" />
+          <PageHeader title={`Chào ${user?.name || 'Sale'}`} subtitle="Theo dõi Lead và công nợ cần xử lý"
+            actions={<Button icon={<ReloadOutlined />} onClick={() => setRevision(value => value + 1)}>Tải lại</Button>} />
           <Row gutter={[16, 16]}>
-            <KpiCard title="Lead của tôi" value={kpis.myLeads || 0} prefix={<UserAddOutlined />} color="#1677ff" />
-            <KpiCard title="Follow-up hôm nay" value={kpis.followUpToday || 0} prefix={<PhoneOutlined />} color="#f5222d" />
-            <KpiCard title="Tỉ lệ chuyển đổi tháng" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" color="#52c41a" />
-            <KpiCard title="Công nợ cần thu" value={kpis.debtToCollect || 0} prefix={<DollarOutlined />} color="#faad14" currency />
+            <KpiCard title="Lead của tôi" value={kpis.myLeads || 0} prefix={<UserAddOutlined />} color="#1677ff" to={data.links?.myLeads} />
+            <KpiCard title="Cần chăm sóc" value={kpis.needsCare || 0} prefix={<PhoneOutlined />} color="#f5222d" to={data.links?.needsCare} note="Chưa liên hệ hoặc đã quá 3 ngày" />
+            <KpiCard title="Tỷ lệ đăng ký" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" color="#52c41a" to={data.links?.conversionRate} note="Đã đăng ký / tổng Lead của tôi" />
+            <KpiCard title="Công nợ cần thu" value={kpis.debtToCollect || 0} prefix={<DollarOutlined />} color="#faad14" currency
+              to={data.links?.debtToCollect} note="Học viên từ Lead đang phụ trách" />
           </Row>
 
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={12}>
-              <DashboardCard title="Lead ưu tiên" extra={<Button type="primary" onClick={() => navigate('/crm/leads')}>Xem tất cả</Button>}>
+              <DashboardCard title="Lead mới cần tiếp nhận" extra={<Button type="primary" onClick={() => navigate('/crm/leads?status=new')}>Xem tất cả</Button>}>
                 <List
-                  locale={{ emptyText: 'Chưa có lead ưu tiên' }}
+                  locale={{ emptyText: 'Không có Lead mới cần tiếp nhận' }}
                   dataSource={lists.priorityLeads || []}
                   rowKey="id"
                   renderItem={(lead: any) => (
-                    <List.Item actions={[<Button key="detail" type="link" onClick={() => navigate(`/crm/leads/${lead.id}`)}>Chi tiết</Button>]}>
-                      <List.Item.Meta title={<Space wrap>{lead.name}<Tag color={lead.score >= 80 ? 'green' : lead.score >= 60 ? 'orange' : 'default'}>Điểm: {lead.score || 0}</Tag></Space>} description={`${lead.phone || 'Chưa có số điện thoại'} - ${lead.source || 'Khác'}`} />
+                    <List.Item actions={[<Button key="detail" type="link" onClick={() => openDetail(`/crm/leads/${lead.id}`)}>Chi tiết</Button>]}>
+                      <List.Item.Meta title={<Space wrap>{lead.name}<Tag color={getLeadStatus('new')?.color}>{getLeadStatus('new')?.label}</Tag></Space>} description={`${lead.phone || 'Chưa có số điện thoại'} - ${lead.source || 'Khác'}`} />
                     </List.Item>
                   )}
                 />
@@ -301,69 +313,41 @@ export function DashboardPage() {
             </Col>
             <Col xs={24} lg={12}>
               <DashboardCard
-                title="Phễu chuyển đổi bán hàng"
+                title="Phân bố trạng thái Lead"
                 extra={
-                  <Button type="link" onClick={() => navigate('/crm/leads')}>
-                    Quản lý phễu
+                  <Button type="link" onClick={() => navigate('/crm/leads?tab=funnel')}>
+                    Xem báo cáo
                   </Button>
                 }
               >
-                {funnelData?.progressionFunnel?.length ? (
-                  <div className="space-y-2.5">
-                    {funnelData.progressionFunnel.map((step: any) => (
-                      <div key={step.step}>
-                        <div className="flex justify-between text-xs text-gray-700">
-                          <span className="font-medium">{step.step}</span>
-                          <span className="font-semibold text-gray-900">
-                            {step.count} lead ({step.percentOfTotal}%)
-                          </span>
-                        </div>
-                        <Progress
-                          percent={step.percentOfTotal}
-                          strokeColor={step.color}
-                          showInfo={false}
-                          size={['100%', 8]}
-                        />
-                      </div>
-                    ))}
-                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 text-xs">
-                      <span className="text-gray-500">
-                        Pipeline: <strong className="text-blue-600">{formatCompactMoney(funnelData.summary?.activePipelineValue || 0)}đ</strong>
-                      </span>
-                      <span className="text-gray-500">
-                        Kỳ vọng AI: <strong className="text-purple-600">{formatCompactMoney(funnelData.summary?.weightedPipelineValue || 0)}đ</strong>
-                      </span>
-                      <span className="text-gray-500">
-                        Win rate: <strong className="text-emerald-600">{funnelData.summary?.winRate || 0}%</strong>
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <EmptyState text="Chưa có dữ liệu phễu" />
-                )}
+                <LeadStatusSummary data={funnelData} error={funnelError} />
               </DashboardCard>
             </Col>
           </Row>
 
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={12}>
-              <DashboardCard title="Lịch follow-up hôm nay">
-                {lists.followUps?.length ? (
-                  <Timeline items={lists.followUps.map((item: any) => ({ children: <div><strong>{item.time}</strong> - {item.title}</div> }))} />
-                ) : (
-                  <EmptyState text="Chưa có lịch follow-up" />
-                )}
+              <DashboardCard title="Lead cần liên hệ lại" extra={<Button type="link" onClick={() => navigate('/crm/leads?needs_care=true')}>Xem tất cả</Button>}>
+                <List locale={{ emptyText: 'Không có Lead cần liên hệ lại' }} dataSource={lists.careLeads || []} rowKey="id"
+                  renderItem={(item: any) => <List.Item actions={[<Button key="contact" type="link"
+                    onClick={() => openDetail(`/crm/leads/${item.id}?contact=1`)}>Ghi nhận liên hệ</Button>]}>
+                    <List.Item.Meta title={item.name} description={`${item.reason}${item.last_contacted ? ` · Gần nhất: ${formatDate(item.last_contacted)}` : ''}`} />
+                  </List.Item>} />
               </DashboardCard>
             </Col>
             <Col xs={24} lg={12}>
-              <DashboardCard title="Học viên cần thu học phí" extra={<Badge count={(lists.paymentIssues || []).length} />}>
+              <DashboardCard title="Khoản phải thu cần xử lý" extra={<Space><Badge count={kpis.debtCases || 0} />
+                <Button type="link" onClick={() => navigate('/finance/debts')}>Xem tất cả</Button></Space>}>
                 <List
                   locale={{ emptyText: 'Chưa có công nợ cần xử lý' }}
                   dataSource={lists.paymentIssues || []}
                   rowKey="id"
                   renderItem={(item: any) => (
-                    <List.Item actions={[<Button key="call" type="link" icon={<PhoneOutlined />}>Gọi ngay</Button>]}>
-                      <List.Item.Meta title={<Space wrap>{item.name}<Tag color={item.overdue > 0 ? 'red' : 'orange'}>{item.overdue > 0 ? `Quá hạn ${item.overdue} ngày` : 'Chưa thanh toán'}</Tag></Space>} description={`Công nợ: ${formatCurrency(item.amount || 0)}`} />
+                    <List.Item actions={[<Button key="call" type="link" icon={<PhoneOutlined />} disabled={!item.phone}
+                      href={item.phone ? `tel:${item.phone}` : undefined}>Gọi ngay</Button>,
+                      <Button key="invoice" type="link" onClick={() => openDetail(item.action)}>Xem khoản phải thu</Button>]}>
+                      <List.Item.Meta title={<Space wrap>{item.name}<BillingStatusTag status={item.status} />
+                        {item.overdue > 0 && <span className="text-xs text-red-600">Trễ {item.overdue} ngày</span>}</Space>} description={`${item.invoiceNo || ''} · Công nợ: ${formatCurrency(item.amount || 0)}`} />
                     </List.Item>
                   )}
                 />
@@ -375,7 +359,8 @@ export function DashboardPage() {
 
       {data.role === 'teacher' && (
         <>
-          <PageHeader title={`Chào Thầy/Cô ${user?.name || ''}`} subtitle="Lịch dạy, điểm danh và học viên cần theo dõi" />
+          <PageHeader title={`Chào Thầy/Cô ${user?.name || ''}`} subtitle="Lịch dạy, điểm danh và học viên cần theo dõi"
+            actions={<Button icon={<ReloadOutlined />} onClick={() => setRevision(value => value + 1)}>Tải lại</Button>} />
           <Alert message={`Hôm nay có ${(lists.todayClasses || []).length} buổi dạy`} type="info" showIcon />
           <Row gutter={[16, 16]}>
             <KpiCard title="Lớp đang dạy" value={kpis.activeClasses || 0} prefix={<BookOutlined />} color="#1677ff" />
@@ -400,14 +385,18 @@ export function DashboardPage() {
               </DashboardCard>
             </Col>
             <Col xs={24} lg={12}>
-              <DashboardCard title="Học viên cần chú ý" extra={<Badge count={(lists.attentionStudents || []).length} />}>
+              <DashboardCard title="Học viên cần hỗ trợ theo lớp" extra={<Space><Badge count={kpis.supportCases || 0} />
+                <Button type="link" onClick={() => navigate(data.links?.dropoutAttention || '/ai/predictions?risk_level=attention')}>Xem tất cả</Button></Space>}>
                 <List
                   locale={{ emptyText: 'Chưa có học viên cần chú ý' }}
                   dataSource={lists.attentionStudents || []}
                   rowKey="id"
                   renderItem={(item: any) => (
-                    <List.Item>
-                      <List.Item.Meta avatar={<WarningOutlined className="text-lg text-orange-500" />} title={item.name} description={item.issue} />
+                    <List.Item actions={[<Button key="risk" type="link" onClick={() => openDetail(item.action)}>Xem cảnh báo</Button>]}>
+                      <List.Item.Meta avatar={<WarningOutlined className="text-lg text-orange-500" />}
+                        title={<Space wrap>{item.name}<SupportPriority data={item.risk} /></Space>}
+                        description={<Space direction="vertical" size={2}><span>{item.className}</span><RiskEstimate data={item.risk} />
+                          <span className="text-xs text-gray-500">{riskTime(item.risk?.evaluated_at)}</span></Space>} />
                     </List.Item>
                   )}
                 />
@@ -445,7 +434,8 @@ export function DashboardPage() {
 
       {data.role === 'student' && (
         <>
-          <PageHeader title={`Chào ${user?.name || 'bạn'}`} subtitle="Lịch học, tiến độ và học phí của bạn" />
+          <PageHeader title={`Chào ${user?.name || 'bạn'}`} subtitle="Lịch học, tiến độ và học phí của bạn"
+            actions={<Button onClick={() => openDetail('/lms/my-profile')}>Hồ sơ của tôi</Button>} />
           {lists.nextClass && (
             <Alert
               message={`Buổi học tiếp theo: ${formatDate(lists.nextClass.date)}`}
@@ -487,15 +477,15 @@ export function DashboardPage() {
 
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={12}>
-              <DashboardCard title="Học phí">
+              <DashboardCard title="Học phí" extra={<Link to="/lms/my-profile?tab=finance">Xem tất cả</Link>}>
                 <List
                   locale={{ emptyText: 'Chưa có hóa đơn' }}
                   dataSource={lists.invoices || []}
                   rowKey="id"
                   renderItem={(item: any) => (
                     <List.Item>
-                      <List.Item.Meta title={item.className || item.title} description={`Hạn: ${formatDate(item.dueDate)} - ${formatCurrency(item.amount || 0)}`} />
-                      <Tag color={item.status === 'paid' ? 'success' : 'orange'}>{item.status === 'paid' ? 'Đã thanh toán' : 'Chưa thanh toán'}</Tag>
+                      <List.Item.Meta title={item.className || item.title} description={`Hạn: ${formatDate(item.dueDate)} · Phải thu: ${formatCurrency(item.amount || 0)} · Còn nợ: ${formatCurrency(item.remainingAmount || 0)}`} />
+                      <BillingStatusTag status={item.status} />
                     </List.Item>
                   )}
                 />

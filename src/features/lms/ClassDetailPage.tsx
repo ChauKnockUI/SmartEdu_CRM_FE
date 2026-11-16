@@ -29,7 +29,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import { RiskEstimate, SupportPriority, RiskDetailsDrawer } from '../../shared/components/DropoutRisk';
-import { type DropoutRiskView } from '../../shared/utils/dropoutRisk';
+import { studentRiskLink, type DropoutRiskView } from '../../shared/utils/dropoutRisk';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams, useSearchParams } from 'react-router';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
@@ -40,6 +40,7 @@ import { scheduleService } from '@/services/api/schedule.service';
 import { materialService } from '@/services/api/material.service';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import dayjs from 'dayjs';
+import { getClassStatus } from './classFilters';
 
 type Class = any;
 
@@ -110,14 +111,17 @@ export function ClassDetailPage() {
   const isTeacher = role === 'teacher';
 
   const [classItem, setClassItem] = useState<Class | null>(null);
+  const [classError, setClassError] = useState('');
   const [loading, setLoading] = useState(false);
   const [riskLoading, setRiskLoading] = useState(false);
   const [classRiskResults, setClassRiskResults] = useState<Record<number, DropoutRiskView>>({});
   const [riskFetching, setRiskFetching] = useState(false);
+  const [riskError, setRiskError] = useState('');
   const [selectedRisk, setSelectedRisk] = useState<{ studentId: number; name: string } | null>(null);
   const riskRequest = useRef(0);
   useEffect(() => {
     setClassRiskResults({});
+    setRiskError('');
     setSelectedRisk(null);
     const request = ++riskRequest.current;
     if (!isAdmin && !isTeacher) return;
@@ -125,7 +129,7 @@ export function ClassDetailPage() {
     classService.getDropoutRisk(Number(id)).then(res => {
       if (request !== riskRequest.current) return;
       setClassRiskResults(Object.fromEntries((res.data || []).map((item: DropoutRiskView) => [item.student_id, item])));
-    }).catch(error => { if (request === riskRequest.current) message.error(error.message); })
+    }).catch(error => { if (request === riskRequest.current) setRiskError(error.message || 'Không tải được cảnh báo của lớp'); })
       .finally(() => { if (request === riskRequest.current) setRiskFetching(false); });
     return () => { riskRequest.current++; };
   }, [id, isAdmin, isTeacher]);
@@ -146,21 +150,23 @@ export function ClassDetailPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
 
   const canUploadMaterial = isAdmin || isTeacher;
-  const canEditClass = isAdmin || isTeacher;
+  const canEditClass = isAdmin;
 
   const fetchClass = async () => {
     try {
       setLoading(true);
+      setClassItem(null); setClassError('');
       const res = await classService.getById(Number(id));
       setClassItem(res.data);
-    } catch {
-      message.error('Lỗi tải lớp học');
+    } catch (err: any) {
+      setClassError(err.message || 'Không tải được lớp học');
     } finally {
       setLoading(false);
     }
   };
 
   const fetchStudents = async () => {
+    if (!isAdmin) return;
     try {
       const res = await studentService.getAll({ page: 1, limit: 100 });
       setStudents(res.data || []);
@@ -192,9 +198,9 @@ export function ClassDetailPage() {
     fetchStudents();
     fetchSchedules();
     fetchMaterials();
-  }, [id]);
+  }, [id, role]);
 
-  if (!classItem) return <div>Không tìm thấy lớp</div>;
+  if (!classItem) return loading ? <Card loading /> : <Alert type="warning" showIcon message={classError || 'Không tìm thấy lớp học'} />;
   const activeStudentIds = new Set<number>((classItem.classEnrollments || []).filter((item: any) => item.status === 'active').map((item: any) => item.student_id));
   const activeClassRisks = Object.values(classRiskResults).filter(item => item.student_id && activeStudentIds.has(item.student_id));
 
@@ -240,14 +246,7 @@ export function ClassDetailPage() {
   };
 
   const getStatusTag = (status: string) => {
-    const map: any = {
-      upcoming: { color: 'blue', label: 'Sắp mở' },
-      ongoing: { color: 'green', label: 'Đang học' },
-      completed: { color: 'default', label: 'Hoàn thành' },
-      cancelled: { color: 'red', label: 'Đã huỷ' },
-    };
-
-    const s = map[status] || map.upcoming;
+    const s = getClassStatus(status);
     return <Tag color={s.color}>{s.label}</Tag>;
   };
 
@@ -353,16 +352,13 @@ export function ClassDetailPage() {
       const request = ++riskRequest.current;
       const res = await classService.scoreDropoutRisk(classItem.id);
       if (request !== riskRequest.current) return;
-      const scored: typeof classRiskResults = {};
-      for (const item of res.data || []) {
-        if (item.success && item.data) scored[item.data.student_id] = { ...item.data, limited_data: item.data.snapshot?.limited_data };
-        else if (item.student_id) scored[item.student_id] = { class_id: classItem.id, student_id: item.student_id,
-          risk_score: null, model_status: item.success ? 'not_eligible' : 'unavailable',
-          evaluated_at: new Date().toISOString(), top_reasons: item.reason ? [item.reason] : [] };
-      }
-      setClassRiskResults(scored);
-      message.success(res.message || 'Đã cập nhật dropout risk cho lớp');
-      fetchClass();
+      const snapshots = await classService.getDropoutRisk(classItem.id);
+      if (request !== riskRequest.current) return;
+      setClassRiskResults(Object.fromEntries((snapshots.data || []).map((item: DropoutRiskView) => [item.student_id, item])));
+      setRiskError('');
+      const failed = (res.data || []).filter((item: any) => !item.success).length;
+      if (failed) message.warning(`${failed} học viên chưa cập nhật được. Các kết quả đã lưu vẫn được giữ nguyên.`);
+      else message.success(res.message || 'Đã cập nhật cảnh báo của lớp');
     } catch (err: any) {
       message.error(err.message || 'Không tính được dropout risk cho lớp');
     } finally {
@@ -459,13 +455,14 @@ export function ClassDetailPage() {
                   {classItem.max_students}
                 </p>
 
-                {(isAdmin || isTeacher) && <div className="mb-4 rounded-lg bg-slate-50 px-4 py-3 text-sm">
+                {(isAdmin || isTeacher) && classItem.status === 'ongoing' && <div className="mb-4 rounded-lg bg-slate-50 px-4 py-3 text-sm">
+                  {riskError ? <Alert type="error" showIcon message={riskError} /> : riskFetching ? 'Đang tải cảnh báo…' :
                   <Space size={20} wrap>
                     <span>Cần liên hệ: <strong>{activeClassRisks.filter(item => item.risk_level === 'high').length}</strong></span>
                     <span>Cần theo dõi: <strong>{activeClassRisks.filter(item => item.risk_level === 'medium').length}</strong></span>
-                    <span>Chưa có ước tính: <strong>{activeStudentIds.size - activeClassRisks.filter(item => typeof item.risk_score === 'number').length}</strong></span>
+                    <span>Chưa xác định: <strong>{activeStudentIds.size - activeClassRisks.filter(item => !!item.risk_level).length}</strong></span>
                     <span className="text-gray-500">Bấm “Xem đánh giá” để xem căn cứ và hướng xử lý.</span>
-                  </Space>
+                  </Space>}
                 </div>}
 
                 <Table
@@ -485,15 +482,18 @@ export function ClassDetailPage() {
                     { title: 'Tình trạng', width: 105, render: (row: any) => <Tag color={row.status === 'active' ? 'green' : 'default'}>
                       {row.status === 'active' ? 'Đang học' : row.status === 'dropped' ? 'Đã nghỉ' : row.status === 'completed' ? 'Hoàn thành' : row.status}
                     </Tag> },
-                    { title: 'Mức cần hỗ trợ', width: 150, render: (row: any) => <SupportPriority data={classRiskResults[row.student_id]} /> },
-                    { title: 'Nguy cơ bỏ học', width: 170, render: (row: any) => <RiskEstimate data={classRiskResults[row.student_id]} showReason={false}
-                      onOpen={() => setSelectedRisk({ studentId: row.student_id, name: row.student?.full_name || `ID: ${row.student_id}` })} /> },
+                    { key: 'priority', title: 'Mức cần hỗ trợ', width: 150, render: (row: any) => classItem.status !== 'ongoing' || row.status !== 'active' ? '—'
+                      : riskError ? 'Chưa tải được' : <SupportPriority data={classRiskResults[row.student_id]} /> },
+                    { key: 'risk', title: 'Nguy cơ bỏ học', width: 170, render: (row: any) => classItem.status !== 'ongoing' || row.status !== 'active'
+                      ? classItem.status === 'upcoming' ? 'Chưa bắt đầu' : 'Đã kết thúc theo dõi' : riskError ? 'Chưa tải được'
+                      : <RiskEstimate data={classRiskResults[row.student_id]} showReason={false}
+                        onOpen={() => setSelectedRisk({ studentId: row.student_id, name: row.student?.full_name || `ID: ${row.student_id}` })} /> },
                     { title: 'Thao tác', width: 150, render: (row: any) => <Space size={4}>
                       {isAdmin && <Popconfirm title="Xóa học viên khỏi lớp?" onConfirm={() => handleUnenroll(row.student_id)} okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }}>
                         <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="Xóa học viên khỏi lớp" title="Xóa học viên khỏi lớp" />
                       </Popconfirm>}
                     </Space> },
-                  ]}
+                  ].filter(column => !['priority', 'risk'].includes(column.key || '') || isAdmin || isTeacher)}
                 />
               </Card>
             ),
@@ -650,7 +650,7 @@ export function ClassDetailPage() {
 
       <RiskDetailsDrawer open={!!selectedRisk} onClose={() => setSelectedRisk(null)} name={selectedRisk?.name}
         className={classItem.name} data={selectedRisk ? classRiskResults[selectedRisk.studentId] : undefined}
-        loading={riskLoading} onEvaluate={selectedRisk && classItem.status === 'ongoing' ? async () => {
+        loading={riskLoading} onEvaluate={(isAdmin || isTeacher) && selectedRisk && classItem.status === 'ongoing' ? async () => {
           const classId = classItem.id;
           const studentId = selectedRisk.studentId;
           const request = riskRequest.current;
@@ -658,12 +658,15 @@ export function ClassDetailPage() {
             setRiskLoading(true);
             const result = await studentService.scoreDropoutRisk(studentId, classId);
             if (!result.data) throw new Error(result.reason || 'Lớp không còn trong giai đoạn theo dõi');
-            if (request === riskRequest.current) setClassRiskResults(previous => ({ ...previous,
-              [studentId]: { ...result.data, limited_data: result.data?.snapshot?.limited_data } }));
+            const snapshots = await classService.getDropoutRisk(classId);
+            if (request === riskRequest.current) {
+              setClassRiskResults(Object.fromEntries((snapshots.data || []).map((item: DropoutRiskView) => [item.student_id, item])));
+              setRiskError('');
+            }
           } catch (error: any) { message.error(error.message || 'Không đánh giá được học viên'); }
           finally { setRiskLoading(false); }
         } : undefined}
-        onProfile={selectedRisk ? () => openDetail(`/lms/students/${selectedRisk.studentId}?tab=classes`) : undefined} />
+        onProfile={selectedRisk ? () => openDetail(studentRiskLink(selectedRisk.studentId, classItem.id)) : undefined} />
 
       <Modal
         title="Chỉnh sửa lớp học"

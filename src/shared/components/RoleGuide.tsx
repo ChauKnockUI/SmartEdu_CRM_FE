@@ -52,6 +52,7 @@ const roleGuides: Record<UserRole, { title: string; description: string; feature
     title: 'Học viên (Student)',
     description: 'Xem thông tin học tập của bản thân',
     features: [
+      '✅ Xem hồ sơ cá nhân, lớp học và học phí của chính mình',
       '✅ Xem lịch học, calendar các buổi học sắp tới',
       '✅ Xem điểm danh của mình (Present/Absent/Late)',
       '✅ Xem học phí: lịch đóng, trạng thái thanh toán',

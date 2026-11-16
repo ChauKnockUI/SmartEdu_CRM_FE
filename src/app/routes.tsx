@@ -53,11 +53,18 @@ export const router = createBrowserRouter([
             children: [
               { index: true, element: <Navigate to="/lms/classes" replace /> },
               {
-                element: <ProtectedRoute roles={['admin', 'teacher']} />,
+                element: <ProtectedRoute roles={['admin', 'sale', 'teacher']} />,
                 children: [
                   { path: 'students', element: <StudentsPage /> },
-                  { path: 'students/:id', element: <StudentDetailPage /> },
                 ],
+              },
+              {
+                element: <ProtectedRoute roles={['admin', 'sale', 'teacher', 'student']} />,
+                children: [{ path: 'students/:id', element: <StudentDetailPage /> }],
+              },
+              {
+                element: <ProtectedRoute roles={['student']} />,
+                children: [{ path: 'my-profile', element: <StudentDetailPage /> }],
               },
               {
                 element: <ProtectedRoute roles={['admin']} />,
