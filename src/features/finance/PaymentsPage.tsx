@@ -24,6 +24,7 @@ import { CheckCircleOutlined, ClockCircleOutlined, ReloadOutlined, SearchOutline
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { financeService } from '../../services/api/finance.service';
+import { InvoiceDetailDrawer } from './InvoiceDetailDrawer';
 import { useSearchParams } from 'react-router';
 import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as getCollectionStatus,
   isCollectibleInvoice, sumBillingMoney, billingDate } from './billingStatus';
@@ -53,6 +54,7 @@ export function PaymentsPage() {
   const [loading, setLoading] = useState(false);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+  const [detailId, setDetailId] = useState<number | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const paymentInFlight = useRef(false);
@@ -119,6 +121,7 @@ export function PaymentsPage() {
       (invoice.payments || []).map((payment: any) => ({
         ...payment,
         invoice_no: invoice.invoice_no,
+        invoice_id: invoice.id,
         student_name: invoice.student?.full_name,
         class_name: invoice.class?.name,
       }))
@@ -159,9 +162,10 @@ export function PaymentsPage() {
       } else if (result.data?.dropout_risk_update === 'partial') {
         message.warning('Đã ghi nhận thanh toán và cập nhật cảnh báo. AI đang tạm gián đoạn; hãy đánh giá lại sau.');
       } else {
-        message.success('Đã ghi nhận thanh toán');
+        message.success(`Đã ghi nhận thanh toán${result.data?.receipt?.receipt_no ? ` · Phiếu thu ${result.data.receipt.receipt_no}` : ''}`);
       }
       setPaymentOpen(false);
+      setDetailId(selectedInvoice.id);
       loadInvoices();
     } catch (err: any) {
       message.error(err.message || 'Ghi nhận thanh toán thất bại');
@@ -197,7 +201,7 @@ export function PaymentsPage() {
       ),
     },
     {
-      title: 'Lớp / Invoice',
+      title: 'Lớp / Khoản phải thu',
       width: 220,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -241,25 +245,27 @@ export function PaymentsPage() {
     },
     {
       title: '',
-      width: 120,
+      width: 220,
       fixed: 'right',
       render: (_, record) => (
+        <Space><Button type="link" onClick={() => setDetailId(record.id)}>Chi tiết</Button>
         <Button type="primary" disabled={!isCollectibleInvoice(record)} onClick={() => openPaymentModal(record)}>
           Thu tiền
-        </Button>
+        </Button></Space>
       ),
     },
   ];
 
   const transactionColumns: ColumnsType<any> = [
     { title: 'Mã GD', dataIndex: 'id', width: 90, render: (id) => `#${id}` },
-    { title: 'Invoice', dataIndex: 'invoice_no', width: 160 },
+    { title: 'Mã khoản thu', dataIndex: 'invoice_no', width: 160 },
     { title: 'Học viên', dataIndex: 'student_name' },
     { title: 'Lớp', dataIndex: 'class_name', render: (value) => value || '-' },
     { title: 'Số tiền', dataIndex: 'amount', align: 'right', render: money },
     { title: 'Phương thức', dataIndex: 'method', render: (value) => <Tag>{METHOD_LABELS[value] || value}</Tag> },
     { title: 'Ngày thu', dataIndex: 'paid_at', render: (value) => value ? new Date(value).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '-' },
     { title: 'Mã đối soát', dataIndex: 'reference_code', render: (value) => value || '-' },
+    { title: '', render: (_, record) => <Button type="link" onClick={() => setDetailId(record.invoice_id)}>Xem phiếu thu</Button> },
   ];
 
   return (
@@ -298,7 +304,7 @@ export function PaymentsPage() {
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="Tìm học viên, SĐT, email, lớp, invoice"
+            placeholder="Tìm học viên, SĐT, email, lớp, mã khoản thu"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             style={{ width: 360 }}
@@ -355,6 +361,7 @@ export function PaymentsPage() {
         />
       </Card>
 
+      <InvoiceDetailDrawer invoiceId={detailId} onClose={() => setDetailId(null)} onChanged={loadInvoices} />
       <Modal
         title={`Thu tiền ${selectedInvoice?.invoice_no || ''}`}
         open={paymentOpen}
@@ -393,7 +400,7 @@ export function PaymentsPage() {
             />
           </Form.Item>
           <Form.Item name="reference_code" label="Mã giao dịch / đối soát">
-            <Input />
+            <Input maxLength={100} />
           </Form.Item>
           <Form.Item name="notes" label="Ghi chú">
             <Input.TextArea rows={3} />

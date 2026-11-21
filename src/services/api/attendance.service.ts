@@ -10,9 +10,10 @@ const getAuthHeader = () => ({
 
 export const attendanceService = {
   // GET session attendance with student list
-  getSessionAttendance: async (scheduleId: number) => {
+  getSessionAttendance: async (scheduleId: number, signal?: AbortSignal) => {
     const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}`, {
       headers: getAuthHeader(),
+      signal,
     });
 
     const json = await res.json();

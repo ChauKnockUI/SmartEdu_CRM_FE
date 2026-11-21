@@ -38,7 +38,8 @@ import { financeService } from '@/services/api/finance.service';
 import dayjs from 'dayjs';
 import { LeadEnrollmentModal } from '../crm/components/LeadEnrollmentModal';
 import { getStudentPermissions } from './studentPermissions';
-import { BillingStatusTag, billingDate, invoiceCollectionLink } from '../finance/billingStatus';
+import { BillingStatusTag, billingDate } from '../finance/billingStatus';
+import { InvoiceDetailDrawer } from '../finance/InvoiceDetailDrawer';
 import { studentStatusColors as STATUS_COLORS, studentStatusLabels as STATUS_LABELS } from './studentFilters';
 import { getClassStatus } from './classFilters';
 
@@ -122,6 +123,7 @@ export function StudentDetailPage() {
   const [invoiceOwner, setInvoiceOwner] = useState('');
   const [invoiceLoading, setInvoiceLoading] = useState(false);
   const [invoiceError, setInvoiceError] = useState('');
+  const [invoiceDetailId, setInvoiceDetailId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [riskLoading, setRiskLoading] = useState(false);
 
@@ -207,6 +209,7 @@ export function StudentDetailPage() {
 
   useEffect(() => {
     setProfile(null); setProfileScope(''); setProfileError(null);
+    setInvoiceDetailId(null);
     setEditOpen(false); setPasswordOpen(false); setEnrollOpen(false); setNewPassword(''); setSaving(false);
     fetchStudent();
     return () => {
@@ -391,7 +394,7 @@ export function StudentDetailPage() {
       dataIndex: 'collection_status',
       render: (status: string) => <BillingStatusTag status={status} />,
     },
-    ...(!isStudent ? [{ title: 'Thao tác', render: (_: any, record: any) => <Button type="link" onClick={() => openDetail(invoiceCollectionLink(record.id))}>Xem khoản phải thu</Button> }] : []),
+    { title: 'Thao tác', render: (_: any, record: any) => <Button type="link" onClick={() => setInvoiceDetailId(record.id)}>Chi tiết / Phiếu thu</Button> },
   ];
 
   return (
@@ -580,7 +583,7 @@ export function StudentDetailPage() {
         ].filter(tab => tab.key !== 'finance' || viewFinance)}
       />
 
-      {canManageStudent && <LeadEnrollmentModal open={enrollOpen} lead={student.lead} studentId={student.id} onCancel={() => setEnrollOpen(false)}
+      {canManageStudent && <LeadEnrollmentModal open={enrollOpen} lead={student.lead} studentId={student.id} enrollments={enrolledClasses} onCancel={() => setEnrollOpen(false)}
         onSuccess={() => { if (scope === currentScope.current) { setEnrollOpen(false); refreshAll(); } }} />}
       <RiskDetailsDrawer open={canReview && !!selectedClass && !!classRisks[selectedClassId!]}
         onClose={closeRisk} name={student.full_name} className={selectedClass?.class?.name}
@@ -638,6 +641,9 @@ export function StudentDetailPage() {
           </Form.Item>
         </Form>
       </Modal>
+
+      {viewFinance && <InvoiceDetailDrawer key={scope} invoiceId={invoiceDetailId} onClose={() => setInvoiceDetailId(null)}
+        onChanged={() => { if (student) fetchInvoices(student.id); }} />}
 
       {/* RESET PASSWORD */}
       <Modal

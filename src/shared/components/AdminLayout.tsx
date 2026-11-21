@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, type MenuProps } from 'antd';
+import { useState, useEffect, useRef } from 'react';
+import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, Spin, message, type MenuProps } from 'antd';
 import {
   BellOutlined,
   BookOutlined,
@@ -37,6 +37,34 @@ dayjs.locale('vi');
 
 const { Header, Sider, Content } = Layout;
 type MenuItem = Required<MenuProps>['items'][number];
+
+type MarkTarget = number | 'all';
+interface NotificationState {
+  scope: string;
+  items: NotificationItem[];
+  unread: number;
+  loading: boolean;
+  error: string;
+  markError: { target: MarkTarget; message: string } | null;
+  pending: MarkTarget[];
+  open: boolean;
+}
+
+const emptyNotifications = (scope: string): NotificationState => ({
+  scope, items: [], unread: 0, loading: !!scope, error: '', markError: null, pending: [], open: false,
+});
+
+// Only app paths are navigable, including when a mark request fails.
+function internalNotificationLink(link?: string | null): string | null {
+  if (!link || !/^\/(?!\/)/.test(link) || /[\\\s\u0000-\u001f\u007f]/.test(link)) return null;
+  try {
+    const url = new URL(link, window.location.origin);
+    return url.origin === window.location.origin && /^\/(?!\/)/.test(url.pathname)
+      ? `${url.pathname}${url.search}${url.hash}` : null;
+  } catch {
+    return null;
+  }
+}
 
 function getItem(label: string, key: string, icon?: React.ReactNode, children?: MenuItem[]): MenuItem {
   return { key, icon, children, label } as MenuItem;
@@ -121,7 +149,7 @@ export function AdminLayout() {
   const [guideVisible, setGuideVisible] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
   const menuItems = getMenuItemsForRole(user?.role || 'admin');
   const selectedMenuKey = user?.role === 'student' && /^\/lms\/students\/[^/]+\/?$/.test(location.pathname)
     ? '/lms/my-profile' : activeMenuKey(location.pathname, leafMenuKeys(menuItems), (location.state as NavigationContext | null)?.menuKey);
@@ -145,58 +173,125 @@ export function AdminLayout() {
     { key: 'logout', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true, onClick: handleLogout },
   ];
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [, setLoadingNotifs] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
-
-  const fetchNotifications = async () => {
-    try {
-      setLoadingNotifs(true);
-      const res = await notificationService.getMyNotifications();
-      if (res.success) {
-        setNotifications(res.data || []);
-        setUnreadCount(res.unread_count || 0);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingNotifs(false);
-    }
-  };
+  const notificationScope = user && token ? JSON.stringify([user.id, user.role, token]) : '';
+  const currentNotificationScope = useRef(notificationScope);
+  currentNotificationScope.current = notificationScope;
+  const notificationRequest = useRef(0);
+  const notificationActions = useRef<{
+    scope: string;
+    refresh: () => void;
+    mark: (target: MarkTarget) => void;
+  } | null>(null);
+  const [notificationState, setNotificationState] = useState(() => emptyNotifications(''));
+  // Hide the previous actor's data during render, before effect cleanup runs.
+  const visibleNotifications = notificationState.scope === notificationScope
+    ? notificationState : emptyNotifications(notificationScope);
+  const { items: notifications, unread: unreadCount, loading: loadingNotifs,
+    error: notifError, markError, pending: pendingMarks, open: notifOpen } = visibleNotifications;
 
   useEffect(() => {
-    if (user) {
-      fetchNotifications();
-      const interval = setInterval(fetchNotifications, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [user]);
+    setNotificationState(emptyNotifications(notificationScope));
+    if (!notificationScope || !token) return;
+    const controller = new AbortController();
+    const options = { token, signal: controller.signal };
+    const isCurrent = () => !controller.signal.aborted && currentNotificationScope.current === notificationScope;
+    const update = (change: (previous: NotificationState) => NotificationState) => {
+      if (isCurrent()) setNotificationState(previous =>
+        isCurrent() && previous.scope === notificationScope ? change(previous) : previous);
+    };
+    // One queue per actor/token: polls never overlap marks or overwrite their result.
+    let queue = Promise.resolve();
+    const enqueue = (operation: () => Promise<void>) => {
+      queue = queue.then(async () => { if (isCurrent()) await operation(); });
+    };
+    let refreshQueued = false;
+    let refreshVersion = 0;
+    const pending = new Set<MarkTarget>();
+    const refresh = () => {
+      if (!isCurrent()) return;
+      refreshVersion++;
+      if (refreshQueued) return;
+      refreshQueued = true;
+      enqueue(async () => {
+        const version = refreshVersion;
+        const request = ++notificationRequest.current;
+        update(previous => ({ ...previous, loading: true, error: '' }));
+        try {
+          const res = await notificationService.getMyNotifications(30, options);
+          if (request === notificationRequest.current) update(previous => ({
+            ...previous, items: res.data || [], unread: res.unread_count || 0,
+          }));
+        } catch (error) {
+          if (request === notificationRequest.current) update(previous => ({
+            ...previous, error: error instanceof Error ? error.message : 'Không tải được thông báo.',
+          }));
+        } finally {
+          update(previous => ({ ...previous, loading: false }));
+          refreshQueued = false;
+          // Focus/open/events during a request still receive a fresh snapshot afterwards.
+          if (version !== refreshVersion) refresh();
+        }
+      });
+    };
+    const mark = (target: MarkTarget) => {
+      if (!isCurrent() || pending.has(target) || pending.has('all') || (target === 'all' && pending.size > 0)) return;
+      pending.add(target);
+      update(previous => ({ ...previous, pending: [...pending], markError: null }));
+      enqueue(async () => {
+        const request = ++notificationRequest.current;
+        try {
+          if (target === 'all') await notificationService.markAllAsRead(options);
+          else await notificationService.markAsRead(target, options);
+          if (request === notificationRequest.current) update(previous => {
+            const wasUnread = previous.items.some(item => item.id === target && !item.is_read);
+            return { ...previous,
+              items: previous.items.map(item => target === 'all' || item.id === target ? { ...item, is_read: true } : item),
+              unread: target === 'all' ? 0 : Math.max(0, previous.unread - (wasUnread ? 1 : 0)),
+            };
+          });
+        } catch (error) {
+          if (isCurrent() && request === notificationRequest.current) {
+            const text = error instanceof Error ? error.message : 'Không đánh dấu đã đọc được.';
+            update(previous => ({ ...previous, markError: { target, message: text } }));
+            // Item navigation closes the popup; the failure must still be visible.
+            message.error(text);
+          }
+        } finally {
+          pending.delete(target);
+          update(previous => ({ ...previous, pending: [...pending] }));
+          refresh();
+        }
+      });
+    };
+    notificationActions.current = { scope: notificationScope, refresh, mark };
+    refresh();
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('crm:notifications-changed', refresh);
+    return () => {
+      controller.abort();
+      notificationRequest.current++;
+      notificationActions.current = null;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('crm:notifications-changed', refresh);
+    };
+  }, [notificationScope, token]);
 
-  const handleMarkAsRead = async (id: number, link?: string | null) => {
-    try {
-      await notificationService.markAsRead(id);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-      setNotifOpen(false);
-      if (link) {
-        navigate(link);
-      }
-    } catch {
-      // ignore
-    }
+  const fetchNotifications = () => {
+    if (notificationActions.current?.scope === notificationScope) notificationActions.current.refresh();
   };
-
-  const handleMarkAllAsRead = async () => {
-    try {
-      await notificationService.markAllAsRead();
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      setUnreadCount(0);
-    } catch {
-      // ignore
-    }
+  const markNotification = (target: MarkTarget) => {
+    if (notificationActions.current?.scope === notificationScope) notificationActions.current.mark(target);
+  };
+  const setNotifOpen = (open: boolean) => setNotificationState(previous =>
+    previous.scope === notificationScope ? { ...previous, open } : previous);
+  const handleMarkAsRead = (notif: NotificationItem) => {
+    if (currentNotificationScope.current !== notificationScope) return;
+    if (!notif.is_read) markNotification(notif.id);
+    setNotifOpen(false);
+    const link = internalNotificationLink(notif.link);
+    if (link) navigate(link);
   };
 
   const getNotifIcon = (type: string) => {
@@ -296,23 +391,44 @@ export function AdminLayout() {
                         type="link"
                         size="small"
                         className="text-white hover:text-blue-100 p-0 text-xs font-medium"
-                        onClick={handleMarkAllAsRead}
+                        loading={pendingMarks.includes('all')}
+                        disabled={pendingMarks.length > 0}
+                        onClick={() => markNotification('all')}
                       >
                         Đã đọc tất cả
                       </Button>
                     )}
                   </div>
 
+                  {loadingNotifs && (
+                    <div role="status" className="px-4 py-3 text-xs text-gray-500 flex items-center gap-2">
+                      <Spin size="small" /> Đang tải thông báo...
+                    </div>
+                  )}
+                  {notifError && (
+                    <div role="alert" className="px-4 py-2 text-xs text-red-600 bg-red-50 flex items-center justify-between gap-2">
+                      <span>{notifError}</span>
+                      <Button size="small" type="link" disabled={loadingNotifs} onClick={fetchNotifications}>Thử lại</Button>
+                    </div>
+                  )}
+                  {markError && (
+                    <div role="alert" className="px-4 py-2 text-xs text-red-600 bg-red-50 flex items-center justify-between gap-2">
+                      <span>{markError.message}</span>
+                      <Button size="small" type="link" disabled={pendingMarks.length > 0}
+                        onClick={() => markNotification(markError.target)}>Thử lại</Button>
+                    </div>
+                  )}
                   <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
                     {notifications.length === 0 ? (
-                      <div className="p-8 text-center">
+                      !loadingNotifs && !notifError && <div className="p-8 text-center">
                         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có thông báo nào" />
                       </div>
                     ) : (
                       notifications.map((notif) => (
                         <div
                           key={notif.id}
-                          onClick={() => handleMarkAsRead(notif.id, notif.link)}
+                          onClick={() => handleMarkAsRead(notif)}
+                          aria-busy={pendingMarks.includes(notif.id) || pendingMarks.includes('all')}
                           className={`p-3.5 hover:bg-gray-50 cursor-pointer transition-colors flex items-start gap-3 ${
                             !notif.is_read ? 'bg-blue-50/50' : ''
                           }`}
@@ -323,7 +439,7 @@ export function AdminLayout() {
                               <span className={`text-xs ${!notif.is_read ? 'font-bold text-gray-900' : 'font-medium text-gray-750'} truncate`}>
                                 {notif.title}
                               </span>
-                              {!notif.is_read && (
+                              {pendingMarks.includes(notif.id) ? <Spin size="small" /> : !notif.is_read && (
                                 <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
                               )}
                             </div>

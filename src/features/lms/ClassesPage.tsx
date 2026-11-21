@@ -18,6 +18,7 @@ import {
   Alert,
   Pagination,
   Space,
+  Typography,
 } from 'antd';
 import {
   PlusOutlined,
@@ -34,6 +35,7 @@ import { classService, type ClassFilterOptions } from '@/services/api/class.serv
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { CLASS_STATUSES, getClassStatus, classPageSizes, readClassLocation, writeClassLocation, classQueryParams, type ClassListView } from './classFilters';
+import { courseSchedulePreview } from './courseSchedule';
 
 type Class = any;
 
@@ -87,6 +89,17 @@ export function ClassesPage() {
   const [creating, setCreating] = useState(false);
   const createBusy = useRef(false);
   const courses = options.courses;
+  const createCourses = courses.filter(course => course.is_active !== false);
+  const selectedCourseId = Form.useWatch('course_id', form);
+  const startDate = Form.useWatch('start_date', form);
+  const scheduleDays = Form.useWatch('schedule_days', form);
+  const selectedCourse = createCourses.find(course => course.id === selectedCourseId);
+  const totalSessions = selectedCourse?.total_sessions;
+  const autoEnd = totalSessions != null;
+  const startDay = startDate?.format('YYYY-MM-DD') || '';
+  const schedulePreview = useMemo(() => autoEnd && scheduleDays?.length
+    ? courseSchedulePreview(startDay, scheduleDays, totalSessions!) : null,
+    [startDay, scheduleDays, totalSessions, autoEnd]);
   const hasFilters = !!(view.search || view.status || view.courseId || view.teacherId || view.unassignedTeacher);
   const updateView = (patch: Partial<ClassListView>, resetPage = true) =>
     setSearchParams(writeClassLocation({ ...view, ...patch, ...(resetPage ? { page: 1 } : {}) }));
@@ -140,6 +153,17 @@ export function ClassesPage() {
     return () => { optionsRequest.current++; };
   }, [user?.id, role]);
   useEffect(() => { setSearchDraft(view.search); }, [view.search]);
+  useEffect(() => {
+    if (open && autoEnd) form.setFieldValue('end_date', schedulePreview ? dayjs(schedulePreview.endDate) : undefined);
+  }, [open, autoEnd, schedulePreview, form]);
+  useEffect(() => {
+    if (!isAdmin || searchParams.get('create') !== '1' || optionsLoading || optionsError || !courses.length) return;
+    const course = createCourses.find(item => item.id === view.courseId);
+    if (course) {
+      form.resetFields(); form.setFieldsValue({ course_id: course.id }); setOpen(true);
+    } else message.warning('Khóa học đã tạm dừng hoặc không còn tồn tại. Vui lòng chọn khóa học đang mở.');
+    const next = new URLSearchParams(searchParams); next.delete('create'); setSearchParams(next, { replace: true });
+  }, [searchParams, optionsLoading, optionsError, courses, isAdmin]);
 
   const parseDbField = <T,>(val: any): T[] => {
     if (Array.isArray(val)) return val;
@@ -190,7 +214,7 @@ export function ClassesPage() {
         name: v.name,
         course_id: v.course_id,
         start_date: v.start_date.format('YYYY-MM-DD') + 'T00:00:00.000Z',
-        end_date: v.end_date.format('YYYY-MM-DD') + 'T00:00:00.000Z',
+        end_date: (schedulePreview?.endDate || v.end_date.format('YYYY-MM-DD')) + 'T00:00:00.000Z',
         schedule_days: v.schedule_days as number[],
         schedule_time: [
           v.schedule_time[0].format('HH:mm'),
@@ -206,7 +230,7 @@ export function ClassesPage() {
       if (view.page !== 1) updateView({ page: 1 }, false);
       else fetchClasses();
     } catch (err: any) {
-      if (!err.errorFields) message.error(err.message || 'Tạo thất bại');
+      if (!err.errorFields) { message.error(err.message || 'Tạo thất bại'); fetchOptions(); }
     } finally {
       createBusy.current = false; setCreating(false);
     }
@@ -242,8 +266,10 @@ export function ClassesPage() {
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              disabled={optionsLoading || !!optionsError || !courses.length}
-              onClick={() => { form.resetFields(); form.setFieldsValue({ course_id: view.courseId }); setOpen(true); }}
+              disabled={optionsLoading || !!optionsError || !createCourses.length}
+              onClick={() => { form.resetFields(); form.setFieldsValue({
+                course_id: createCourses.some(course => course.id === view.courseId) ? view.courseId : undefined,
+              }); setOpen(true); }}
             >
               Tạo lớp học
             </Button>
@@ -371,9 +397,11 @@ export function ClassesPage() {
         open={open}
         onOk={handleCreate}
         confirmLoading={creating}
+        okButtonProps={{ disabled: optionsLoading || (autoEnd && !schedulePreview) }}
+        cancelButtonProps={{ disabled: creating }} closable={!creating} maskClosable={!creating} keyboard={!creating}
         onCancel={() => { if (!createBusy.current) setOpen(false); }}
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} disabled={creating} layout="vertical">
           <Form.Item name="name" label="Tên lớp" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -381,37 +409,35 @@ export function ClassesPage() {
           <Form.Item
             name="course_id"
             label="Khóa học"
-            rules={[{ required: true }]}
+            rules={[{ required: true }, { validator: (_, value) => !value || createCourses.some(course => course.id === value)
+              ? Promise.resolve() : Promise.reject(new Error('Chọn khóa học đang mở.')) }]}
           >
             <Select
               showSearch optionFilterProp="label"
-              options={courses.map((c) => ({
+              options={createCourses.map((c) => ({
                 label: c.name,
                 value: c.id,
               }))}
             />
           </Form.Item>
 
+          {selectedCourse && <Typography.Paragraph type="secondary">
+            {autoEnd ? `Khóa học gồm ${totalSessions} buổi. Ngày kết thúc được tính theo các thứ học đã chọn.`
+              : 'Khóa học chưa có số buổi. Nhập ngày kết thúc để tạo lịch như hiện tại.'}
+          </Typography.Paragraph>}
+
           <Form.Item
             name="start_date"
             label="Ngày bắt đầu"
             rules={[{ required: true }]}
           >
-            <DatePicker className="w-full" />
-          </Form.Item>
-
-          <Form.Item
-            name="end_date"
-            label="Ngày kết thúc"
-            rules={[{ required: true }]}
-          >
-            <DatePicker className="w-full" />
+            <DatePicker className="w-full" format="DD/MM/YYYY" />
           </Form.Item>
 
           <Form.Item
             name="schedule_days"
             label="Thứ học"
-            rules={[{ required: true }]}
+            rules={[{ required: true, type: 'array', min: 1, message: 'Chọn ít nhất một thứ học trong tuần.' }]}
           >
             <Select
               mode="multiple"
@@ -427,6 +453,14 @@ export function ClassesPage() {
               ]}
             />
           </Form.Item>
+          <Typography.Paragraph type="secondary">Số buổi mỗi tuần: {scheduleDays?.length || 0}</Typography.Paragraph>
+
+          <Form.Item name="end_date" label={autoEnd ? 'Ngày kết thúc dự kiến (tự tính)' : 'Ngày kết thúc'} rules={[{ required: true }]}>
+            <DatePicker className="w-full" disabled={autoEnd} format="DD/MM/YYYY" />
+          </Form.Item>
+          {schedulePreview && <Alert className="mb-4" type="info" showIcon
+            message={`${totalSessions} buổi · ${scheduleDays.length} buổi/tuần · Buổi đầu ${dayjs(schedulePreview.firstDate).format('DD/MM/YYYY')} · Buổi cuối ${dayjs(schedulePreview.endDate).format('DD/MM/YYYY')}`}
+            description="Tính theo lịch học hằng tuần, chưa trừ ngày nghỉ lễ." />}
 
           <Form.Item
             name="schedule_time"

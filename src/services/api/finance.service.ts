@@ -52,7 +52,9 @@ export const financeService = {
     return request(`/invoices${query ? `?${query}` : ''}`);
   },
 
-  getInvoiceById: (id: number) => request(`/invoices/${id}`),
+  getInvoiceById: (id: number, signal?: AbortSignal) => request(`/invoices/${id}`, { signal }),
+
+  getReceipt: (invoiceId: number, receiptId: number) => request(`/invoices/${invoiceId}/receipts/${receiptId}`),
 
   createInvoice: (data: any) =>
     request('/invoices', {

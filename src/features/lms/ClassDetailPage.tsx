@@ -15,6 +15,7 @@ import {
   Space,
   Alert,
   TimePicker,
+  DatePicker,
   Upload,
   Popconfirm,
 } from 'antd';
@@ -37,6 +38,7 @@ import { classTab } from '../../shared/utils/navigation';
 import { classService } from '@/services/api/class.service';
 import { studentService } from '@/services/api/student.service';
 import { scheduleService } from '@/services/api/schedule.service';
+import { SessionAttendanceTag, SessionStatusTag } from './sessionStatus';
 import { materialService } from '@/services/api/material.service';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import dayjs from 'dayjs';
@@ -106,6 +108,7 @@ export function ClassDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const role = user?.role;
+  const currentContext = useRef(''); currentContext.current = `${id}:${user?.id}:${role}`;
 
   const isAdmin = role === 'admin';
   const isTeacher = role === 'teacher';
@@ -135,14 +138,20 @@ export function ClassDetailPage() {
   }, [id, isAdmin, isTeacher]);
 
   const [students, setStudents] = useState<any[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsError, setStudentsError] = useState('');
   const [schedules, setSchedules] = useState<any[]>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [schedulesError, setSchedulesError] = useState('');
   const [materials, setMaterials] = useState<any[]>([]);
 
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
   const [enrollLoading, setEnrollLoading] = useState(false);
+  const [withdrawLoading, setWithdrawLoading] = useState<number | null>(null);
 
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   const [form] = Form.useForm();
@@ -153,35 +162,43 @@ export function ClassDetailPage() {
   const canEditClass = isAdmin;
 
   const fetchClass = async () => {
+    const context = currentContext.current;
     try {
       setLoading(true);
       setClassItem(null); setClassError('');
       const res = await classService.getById(Number(id));
+      if (context !== currentContext.current) return;
       setClassItem(res.data);
     } catch (err: any) {
-      setClassError(err.message || 'Không tải được lớp học');
+      if (context === currentContext.current) setClassError(err.message || 'Không tải được lớp học');
     } finally {
-      setLoading(false);
+      if (context === currentContext.current) setLoading(false);
     }
   };
 
   const fetchStudents = async () => {
     if (!isAdmin) return;
+    const context = currentContext.current;
     try {
-      const res = await studentService.getAll({ page: 1, limit: 100 });
+      setStudentsLoading(true); setStudentsError('');
+      const res = await studentService.getEnrollmentOptions();
+      if (context !== currentContext.current) return;
       setStudents(res.data || []);
-    } catch {
-      message.error('Không tải được danh sách học viên');
-    }
+    } catch (error: any) {
+      if (context === currentContext.current) { setStudents([]); setStudentsError(error.message || 'Không tải được danh sách học viên'); }
+    } finally { if (context === currentContext.current) setStudentsLoading(false); }
   };
 
   const fetchSchedules = async () => {
+    const context = currentContext.current;
     try {
+      setSchedulesLoading(true); setSchedulesError('');
       const res = await scheduleService.getByClass(Number(id));
+      if (context !== currentContext.current) return;
       setSchedules(res.data || []);
-    } catch {
-      setSchedules([]);
-    }
+    } catch (error: any) {
+      if (context === currentContext.current) { setSchedules([]); setSchedulesError(error.message || 'Không tải được lịch học.'); }
+    } finally { if (context === currentContext.current) setSchedulesLoading(false); }
   };
 
   const fetchMaterials = async () => {
@@ -194,14 +211,22 @@ export function ClassDetailPage() {
   };
 
   useEffect(() => {
+    const context = `${id}:${user?.id}:${role}`; currentContext.current = context;
+    setEnrollModalOpen(false); setSelectedStudentIds([]);
+    setEnrollLoading(false); setWithdrawLoading(null);
+    setEditSaving(false); setEditModalOpen(false);
+    setSchedules([]); setSchedulesError('');
     fetchClass();
     fetchStudents();
     fetchSchedules();
     fetchMaterials();
-  }, [id, role]);
+    return () => { if (currentContext.current === context) currentContext.current = ''; };
+  }, [id, role, user?.id]);
 
   if (!classItem) return loading ? <Card loading /> : <Alert type="warning" showIcon message={classError || 'Không tìm thấy lớp học'} />;
   const activeStudentIds = new Set<number>((classItem.classEnrollments || []).filter((item: any) => item.status === 'active').map((item: any) => item.student_id));
+  const canEnroll = isAdmin && ['upcoming', 'ongoing'].includes(classItem.status);
+  const candidateStudents = students.filter(student => !(classItem.classEnrollments || []).some((item: any) => item.student_id === student.id && item.status !== 'dropped'));
   const activeClassRisks = Object.values(classRiskResults).filter(item => item.student_id && activeStudentIds.has(item.student_id));
 
   const handleEdit = () => {
@@ -212,9 +237,11 @@ export function ClassDetailPage() {
       name: classItem.name,
       max_students: classItem.max_students,
       schedule_days: daysArr,
+      start_date: classItem.start_date ? dayjs(classItem.start_date) : undefined,
+      end_date: classItem.end_date ? dayjs(classItem.end_date) : undefined,
       schedule_time:
         timeArr.length === 2
-          ? [dayjs(timeArr[0], 'HH:mm'), dayjs(timeArr[1], 'HH:mm')]
+          ? timeArr.map(value => dayjs(`1970-01-01T${String(value).match(/(?:^|T)(\d{2}:\d{2})/)?.[1]}:00`))
           : undefined,
     });
 
@@ -222,12 +249,16 @@ export function ClassDetailPage() {
   };
 
   const handleUpdate = async () => {
+    if (!isAdmin || editSaving) return;
+    const context = currentContext.current;
     try {
       const values = await form.validateFields();
-
-      await classService.update(classItem.id, {
+      setEditSaving(true);
+      const result = await classService.update(classItem.id, {
         name: values.name,
         max_students: values.max_students,
+        start_date: values.start_date ? `${values.start_date.format('YYYY-MM-DD')}T00:00:00.000Z` : undefined,
+        end_date: values.end_date ? `${values.end_date.format('YYYY-MM-DD')}T00:00:00.000Z` : undefined,
         schedule_days: values.schedule_days as number[],
         schedule_time: values.schedule_time
           ? [
@@ -237,12 +268,14 @@ export function ClassDetailPage() {
           : undefined,
       });
 
-      message.success('Cập nhật thành công');
+      if (context !== currentContext.current) return;
+      message.success(result.message || 'Cập nhật thành công');
       setEditModalOpen(false);
       fetchClass();
+      fetchSchedules();
     } catch (err: any) {
-      message.error(err.message || 'Lỗi cập nhật');
-    }
+      if (context === currentContext.current && !err.errorFields) message.error(err.message || 'Lỗi cập nhật');
+    } finally { if (context === currentContext.current) setEditSaving(false); }
   };
 
   const getStatusTag = (status: string) => {
@@ -251,14 +284,17 @@ export function ClassDetailPage() {
   };
 
   const handleEnroll = async () => {
+    if (!canEnroll || enrollLoading || studentsLoading || studentsError) return;
     if (!selectedStudentIds.length) {
       message.warning('Chọn ít nhất 1 học viên');
       return;
     }
 
+    const context = currentContext.current;
     try {
       setEnrollLoading(true);
       const res = await classService.enrollStudents(classItem.id, selectedStudentIds);
+      if (context !== currentContext.current) return;
 
       const failed = res.data.failed || [];
       const successful = res.data.successful || [];
@@ -272,7 +308,7 @@ export function ClassDetailPage() {
           content: (
             <div>
               <Alert
-                type="success"
+                type={successful.length > 0 ? 'success' : 'warning'}
                 message={`Thành công: ${successful.length} học viên`}
                 className="mb-4"
               />
@@ -283,7 +319,7 @@ export function ClassDetailPage() {
                 rowKey="student_id"
                 dataSource={failed}
                 columns={[
-                  { title: 'Student ID', dataIndex: 'student_id' },
+                  { title: 'Học viên', render: (record: any) => students.find(student => student.id === record.student_id)?.full_name || `#${record.student_id}` },
                   { title: 'Lý do', dataIndex: 'reason' },
                 ]}
               />
@@ -296,20 +332,24 @@ export function ClassDetailPage() {
       setSelectedStudentIds([]);
       fetchClass();
     } catch (err: any) {
-      message.error(err.message);
+      if (context === currentContext.current) message.error(err.message);
     } finally {
-      setEnrollLoading(false);
+      if (context === currentContext.current) setEnrollLoading(false);
     }
   };
 
   const handleUnenroll = async (studentId: number) => {
+    if (!isAdmin || withdrawLoading !== null) return;
+    const context = currentContext.current;
     try {
-      await classService.unenrollStudent(classItem.id, studentId);
-      message.success('Đã hủy ghi danh học viên khỏi lớp');
+      setWithdrawLoading(studentId);
+      const result = await classService.unenrollStudent(classItem.id, studentId);
+      if (context !== currentContext.current) return;
+      message.success(result.message || 'Đã ghi nhận học viên nghỉ lớp');
       fetchClass();
     } catch (err: any) {
-      message.error(err.message || 'Lỗi khi xóa học viên');
-    }
+      if (context === currentContext.current) message.error(err.message || 'Không ghi nhận được trạng thái nghỉ lớp');
+    } finally { if (context === currentContext.current) setWithdrawLoading(null); }
   };
 
   const handleUploadMaterial = async () => {
@@ -447,11 +487,11 @@ export function ClassDetailPage() {
                   {(isAdmin || isTeacher) && <Button type="primary" icon={<WarningOutlined />}
                     loading={riskLoading} disabled={riskFetching || classItem.status !== 'ongoing'}
                     onClick={handleScoreClassDropoutRisk}>Đánh giá nguy cơ bỏ học</Button>}
-                  {isAdmin && <Button onClick={() => setEnrollModalOpen(true)}>Thêm học viên</Button>}
+                  {canEnroll && <Button onClick={() => { setSelectedStudentIds([]); setEnrollModalOpen(true); }}>Thêm học viên</Button>}
                 </Space>}
               >
                 <p className="mb-4 text-gray-600">
-                  Sĩ số: <strong>{classItem._count?.classEnrollments || 0}</strong> /{' '}
+                  Sĩ số đang học: <strong>{classItem._count?.classEnrollments || 0}</strong> /{' '}
                   {classItem.max_students}
                 </p>
 
@@ -479,8 +519,11 @@ export function ClassDetailPage() {
                       <span className="text-xs text-gray-500">{row.student?.email || '—'}</span>
                     </Space> },
                     { title: 'Điện thoại', width: 125, render: (row: any) => row.student?.phone || '—' },
-                    { title: 'Tình trạng', width: 105, render: (row: any) => <Tag color={row.status === 'active' ? 'green' : 'default'}>
-                      {row.status === 'active' ? 'Đang học' : row.status === 'dropped' ? 'Đã nghỉ' : row.status === 'completed' ? 'Hoàn thành' : row.status}
+                    { title: 'Tình trạng', width: 125,
+                      filters: [{ text: 'Đang học', value: 'active' }, { text: 'Đã nghỉ lớp', value: 'dropped' }, { text: 'Hoàn thành', value: 'completed' }],
+                      onFilter: (value: any, row: any) => row.status === value,
+                      render: (row: any) => <Tag color={row.status === 'active' ? 'green' : row.status === 'dropped' ? 'red' : 'default'}>
+                      {row.status === 'active' ? 'Đang học' : row.status === 'dropped' ? 'Đã nghỉ lớp' : row.status === 'completed' ? 'Hoàn thành' : row.status}
                     </Tag> },
                     { key: 'priority', title: 'Mức cần hỗ trợ', width: 150, render: (row: any) => classItem.status !== 'ongoing' || row.status !== 'active' ? '—'
                       : riskError ? 'Chưa tải được' : <SupportPriority data={classRiskResults[row.student_id]} /> },
@@ -489,9 +532,13 @@ export function ClassDetailPage() {
                       : <RiskEstimate data={classRiskResults[row.student_id]} showReason={false}
                         onOpen={() => setSelectedRisk({ studentId: row.student_id, name: row.student?.full_name || `ID: ${row.student_id}` })} /> },
                     { title: 'Thao tác', width: 150, render: (row: any) => <Space size={4}>
-                      {isAdmin && <Popconfirm title="Xóa học viên khỏi lớp?" onConfirm={() => handleUnenroll(row.student_id)} okText="Xóa" cancelText="Hủy" okButtonProps={{ danger: true }}>
-                        <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="Xóa học viên khỏi lớp" title="Xóa học viên khỏi lớp" />
+                      {isAdmin && row.status === 'active' && <Popconfirm title="Cho học viên nghỉ lớp?"
+                        description="Giữ nguyên học phí và dữ liệu học tập. Học viên không còn tính vào sĩ số đang học."
+                        onConfirm={() => handleUnenroll(row.student_id)} okText="Cho nghỉ lớp" cancelText="Hủy" okButtonProps={{ danger: true }}>
+                        <Button type="text" danger size="small" loading={withdrawLoading === row.student_id} disabled={withdrawLoading !== null}>Cho nghỉ lớp</Button>
                       </Popconfirm>}
+                      {canEnroll && row.status === 'dropped' && candidateStudents.some(student => student.id === row.student_id)
+                        && <Button size="small" onClick={() => { setSelectedStudentIds([row.student_id]); setEnrollModalOpen(true); }}>Ghi danh lại</Button>}
                     </Space> },
                   ].filter(column => !['priority', 'risk'].includes(column.key || '') || isAdmin || isTeacher)}
                 />
@@ -503,11 +550,14 @@ export function ClassDetailPage() {
             label: 'Buổi học',
             children: (
               <Card>
+                {schedulesError && <Alert className="mb-4" type="error" showIcon message={schedulesError}
+                  action={<Button onClick={fetchSchedules}>Thử lại</Button>} />}
                 <Table
                   rowKey="id"
+                  loading={schedulesLoading}
                   dataSource={schedules}
                   pagination={{ pageSize: 10 }}
-                  locale={{ emptyText: 'Chưa có buổi học nào' }}
+                  locale={{ emptyText: schedulesError ? 'Chưa tải được lịch học' : schedulesLoading ? 'Đang tải lịch học…' : 'Chưa có buổi học nào' }}
                   columns={[
                     {
                       title: 'Ngày học',
@@ -533,22 +583,18 @@ export function ClassDetailPage() {
                     {
                       title: 'Giảng viên',
                       render: (row: any) =>
-                        row.teacher?.full_name || classItem.teacher?.full_name || '—',
+                        row.teacher?.full_name || 'Chưa phân công',
                     },
                     {
                       title: 'Trạng thái',
-                      render: (row: any) =>
-                        row.attendances?.length > 0 ? (
-                          <Tag color="green">Đã điểm danh</Tag>
-                        ) : (
-                          <Tag color="blue">Chưa điểm danh</Tag>
-                        ),
+                      render: (row: any) => <Space size={0} wrap><SessionStatusTag status={row.status} scheduleChange={row.scheduleChange} />
+                        <SessionAttendanceTag status={row.status} attendances={row.attendances} personal={user?.role === 'student'} /></Space>,
                     },
                     {
                       title: 'Thao tác',
                       render: (row: any) => (
                         <Space>
-                          {isTeacher && (
+                          {isTeacher && row.status !== 'cancelled' && (
                             <Button
                               type="primary"
                               size="small"
@@ -670,11 +716,17 @@ export function ClassDetailPage() {
 
       <Modal
         title="Chỉnh sửa lớp học"
-        open={editModalOpen}
+        open={isAdmin && editModalOpen}
+        confirmLoading={editSaving}
+        closable={!editSaving}
+        maskClosable={!editSaving}
+        cancelButtonProps={{ disabled: editSaving }}
         onOk={handleUpdate}
-        onCancel={() => setEditModalOpen(false)}
+        onCancel={() => { if (!editSaving) setEditModalOpen(false); }}
       >
-        <Form form={form} layout="vertical">
+        <Alert className="mb-4" showIcon type="info" message="Lịch mới chỉ áp dụng cho các buổi chưa bắt đầu."
+          description="Các buổi đã học hoặc có điểm danh được giữ nguyên. Buổi sắp tới không còn thuộc lịch mới sẽ được đánh dấu hủy." />
+        <Form form={form} layout="vertical" disabled={editSaving}>
           <Form.Item name="name" label="Tên lớp" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -687,31 +739,44 @@ export function ClassDetailPage() {
             <Select mode="multiple" placeholder="Chọn các ngày học" options={DAY_OPTIONS} />
           </Form.Item>
 
+          <Form.Item name="start_date" label="Ngày bắt đầu"><DatePicker className="w-full" format="DD/MM/YYYY" allowClear={false} /></Form.Item>
+          <Form.Item name="end_date" label="Ngày kết thúc"><DatePicker className="w-full" format="DD/MM/YYYY" allowClear={false} /></Form.Item>
+
           <Form.Item name="schedule_time" label="Giờ học">
-            <TimePicker.RangePicker className="w-full" format="HH:mm" />
+            <TimePicker.RangePicker className="w-full" format="HH:mm" allowClear={false} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
         title="Thêm học viên vào lớp"
-        open={enrollModalOpen}
-        onCancel={() => setEnrollModalOpen(false)}
+        open={canEnroll && enrollModalOpen}
+        onCancel={() => { if (!enrollLoading) setEnrollModalOpen(false); }}
         onOk={handleEnroll}
         confirmLoading={enrollLoading}
+        closable={!enrollLoading}
+        maskClosable={!enrollLoading}
+        cancelButtonProps={{ disabled: enrollLoading }}
+        okButtonProps={{ disabled: !canEnroll || studentsLoading || !!studentsError || !selectedStudentIds.length }}
         width={700}
       >
+        <Alert className="mb-4" type="info" showIcon message="Học viên đã nghỉ có thể ghi danh lại; học phí và dữ liệu cũ được giữ nguyên."
+          description="Ghi danh lại không tự tạo thêm học phí. Kiểm tra học phí tại hồ sơ học viên nếu cần điều chỉnh." />
+        {studentsError && <Alert className="mb-4" type="error" showIcon message={studentsError}
+          action={<Button onClick={fetchStudents}>Thử lại</Button>} />}
         <Select
           mode="multiple"
           style={{ width: '100%' }}
           placeholder="Chọn học viên"
           value={selectedStudentIds}
+          loading={studentsLoading}
+          disabled={enrollLoading || studentsLoading || !!studentsError}
           onChange={setSelectedStudentIds}
           optionFilterProp="label"
           showSearch
-          options={students.map((s) => ({
+          options={candidateStudents.map((s) => ({
             value: s.id,
-            label: `${s.full_name} (${s.email})`,
+            label: `${s.full_name} (${s.email})${classItem.classEnrollments?.some((item: any) => item.student_id === s.id && item.status === 'dropped') ? ' · Ghi danh lại' : ''}`,
           }))}
         />
       </Modal>

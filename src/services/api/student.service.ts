@@ -23,6 +23,16 @@ const getAuthHeader = () => {
 };
 
 export const studentService = {
+    getEnrollmentOptions: async (signal?: AbortSignal): Promise<{ data: any[] }> => {
+        const first = await studentService.getAll({ page: 1, limit: 500, status: 'active' }, signal);
+        const data = [...(first.data || [])];
+        const pages = Math.ceil((first.pagination?.total || data.length) / (first.pagination?.limit || 500));
+        for (let page = 2; page <= pages; page++) {
+            const result = await studentService.getAll({ page, limit: 500, status: 'active' }, signal);
+            data.push(...(result.data || []));
+        }
+        return { data };
+    },
     getFilterOptions: async (signal?: AbortSignal): Promise<{ data: { classes: { id: number; name: string }[] } }> => {
         const res = await fetch(`${config.baseURL}/students/filter-options`, { headers: getAuthHeader(), signal });
         const json = await res.json();

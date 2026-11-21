@@ -28,6 +28,7 @@ import { classService } from '../../services/api/class.service';
 import { scheduleService } from '../../services/api/schedule.service';
 import dayjs from 'dayjs';
 import 'dayjs/locale/vi';
+import { SessionAttendanceTag, SessionStatusTag, type SessionChangeState } from './sessionStatus';
 
 dayjs.locale('vi');
 
@@ -55,6 +56,7 @@ interface MySession {
   endTime?: string | Date | null;
   room?: string;
   status: string;
+  scheduleChange?: SessionChangeState;
   attendances?: any[];
 }
 
@@ -281,18 +283,15 @@ export function MySchedulePage() {
         schedule: item.schedule,
         room: item.room?.name || item.room_name || item.room || '-',
         students:
-          item.students_count ||
-          item.student_count ||
-          item.classEnrollments?.length ||
-          item.enrollments?.length ||
+          item._count?.classEnrollments ?? item.students_count ??
+          item.student_count ??
+          item.classEnrollments?.filter((entry: any) => entry.status === 'active').length ??
+          item.enrollments?.filter((entry: any) => entry.status === 'active').length ??
           0,
         status: item.status,
       }));
 
       const sessionList = getArrayData(scheduleRes).map((item: any) => {
-        const hasAttendance =
-          Array.isArray(item.attendances) && item.attendances.length > 0;
-
         return {
           id: item.id,
           classId: item.class_id || item.classId || item.class?.id,
@@ -301,7 +300,8 @@ export function MySchedulePage() {
           startTime: item.start_time || item.startTime,
           endTime: item.end_time || item.endTime,
           room: item.room?.name || item.room_name || item.room || '-',
-          status: hasAttendance ? 'attended' : item.status || 'scheduled',
+          status: item.status || 'scheduled',
+          scheduleChange: item.scheduleChange,
           attendances: item.attendances || [],
         };
       });
@@ -316,14 +316,14 @@ export function MySchedulePage() {
   };
 
   const todaySessions = useMemo(() => {
-    return sessions.filter((session) => dayjs(session.date).isSame(dayjs(), 'day'));
+    return sessions.filter((session) => session.status !== 'cancelled' && dayjs(session.date).isSame(dayjs(), 'day'));
   }, [sessions]);
 
   const upcomingSessions = useMemo(() => {
     return sessions
       .filter((session) => {
         const sessionDate = dayjs(session.date);
-        return sessionDate.isSame(dayjs(), 'day') || sessionDate.isAfter(dayjs(), 'day');
+        return session.status !== 'cancelled' && (sessionDate.isSame(dayjs(), 'day') || sessionDate.isAfter(dayjs(), 'day'));
       })
       .sort((a, b) => dayjs(a.date).valueOf() - dayjs(b.date).valueOf());
   }, [sessions]);
@@ -332,7 +332,7 @@ export function MySchedulePage() {
 
   const weeklyHours = useMemo(() => {
     return sessions
-      .filter((session) => dayjs(session.date).isSame(dayjs(), 'week'))
+      .filter((session) => session.status !== 'cancelled' && dayjs(session.date).isSame(dayjs(), 'week'))
       .reduce((total, session) => {
         const start = dayjs(session.startTime);
         const end = dayjs(session.endTime);
@@ -347,11 +347,9 @@ export function MySchedulePage() {
     return sessions
       .filter((session) => dayjs(session.date).isSame(value, 'day'))
       .map((session) => ({
-        type:
-          session.status === 'attended' || session.status === 'completed'
-            ? 'success'
-            : 'processing',
-        content: `${formatTime(session.startTime)} - ${session.className}`,
+        type: session.status === 'cancelled' || (isStudent && session.attendances?.[0]?.status === 'absent') ? 'error'
+          : isStudent && session.attendances?.[0]?.status === 'late' ? 'warning' : session.attendances?.length ? 'success' : 'processing',
+        content: `${formatTime(session.startTime)} - ${session.className}${session.status === 'cancelled' ? ' (Đã hủy)' : ''}`,
       }));
   };
 
@@ -395,21 +393,10 @@ export function MySchedulePage() {
     navigate(`/lms/sessions/${sessionId}`);
   };
 
-  const renderSessionStatus = (status: string) => {
-    if (status === 'attended') {
-      return <Tag color="success">Đã điểm danh</Tag>;
-    }
-
-    if (status === 'completed') {
-      return <Tag color="cyan">Đã hoàn thành</Tag>;
-    }
-
-    if (status === 'cancelled') {
-      return <Tag color="error">Đã hủy</Tag>;
-    }
-
-    return <Tag color="processing">Chưa điểm danh</Tag>;
-  };
+  const renderSessionStatus = (session: MySession) => <Space size={0} wrap>
+    <SessionStatusTag status={session.status} scheduleChange={session.scheduleChange} />
+    <SessionAttendanceTag status={session.status} attendances={session.attendances} personal={isStudent} />
+  </Space>;
 
   const classColumns: ColumnsType<MyClass> = [
     {
@@ -503,7 +490,9 @@ export function MySchedulePage() {
       dataIndex: 'className',
       key: 'className',
       render: (className: string, record) => (
-        <Button type="link" onClick={() => openClassDetail(record.classId)}>
+        <Button type="link" disabled={isTeacher && !classes.some(item => item.id === record.classId)}
+          title="Quyền xem chi tiết lớp theo phân công hiện tại; bạn vẫn xem được buổi học đã phụ trách."
+          onClick={() => openClassDetail(record.classId)}>
           {className}
         </Button>
       ),
@@ -556,14 +545,14 @@ export function MySchedulePage() {
       title: 'Trạng thái',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => renderSessionStatus(status),
+      render: (_: string, record) => renderSessionStatus(record),
     },
     {
       title: 'Thao tác',
       key: 'action',
       render: (_, record) => (
         <Space size="small">
-          {isTeacher && (
+          {isTeacher && record.status !== 'cancelled' && (
             <Button
               type="primary"
               size="small"
@@ -628,7 +617,7 @@ export function MySchedulePage() {
                     </Tag>
                     <span className="font-medium text-gray-800">{session.className}</span>
                     <span className="text-gray-500">({session.room || 'Chưa xếp phòng'})</span>
-                    {renderSessionStatus(session.status)}
+                    {renderSessionStatus(session)}
                   </div>
                 ))}
               </div>
@@ -692,7 +681,7 @@ export function MySchedulePage() {
             <div className="text-2xl font-bold text-purple-600">
               {isTeacher
                 ? classes.reduce((total, item) => total + (item.students || 0), 0)
-                : sessions.filter((item) => item.status === 'completed').length}
+                : sessions.filter(item => item.status !== 'cancelled' && item.attendances?.some(att => ['present', 'late'].includes(att.status))).length}
             </div>
             <div className="text-gray-600 mt-1">
               {isTeacher ? 'Tổng học viên' : 'Buổi đã học'}
@@ -763,12 +752,12 @@ export function MySchedulePage() {
                       <span>{session.room || '-'}</span>
                     </Space>
 
-                    {renderSessionStatus(session.status)}
+                    {renderSessionStatus(session)}
                   </Space>
                 </div>
 
                 <Space>
-                  {isTeacher && (
+                  {isTeacher && session.status !== 'cancelled' && (
                     <Button
                       type="primary"
                       icon={<CheckCircleOutlined />}
@@ -791,6 +780,7 @@ export function MySchedulePage() {
                   </Button>
 
                   <Button
+                    disabled={isTeacher && !classes.some(item => item.id === session.classId)}
                     onClick={() => {
                       setDayDetailVisible(false);
                       openClassDetail(session.classId);

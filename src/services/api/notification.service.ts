@@ -2,11 +2,22 @@ import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
 
-const getAuthHeader = () => ({
+interface NotificationRequestOptions {
+  token?: string;
+  signal?: AbortSignal;
+}
+
+const getAuthHeader = (token = localStorage.getItem('token')) => ({
   ...config.headers,
   'Content-Type': 'application/json',
-  Authorization: `Bearer ${localStorage.getItem('token')}`,
+  Authorization: `Bearer ${token}`,
 });
+
+async function readResponse<T>(res: Response, fallback: string): Promise<T> {
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json?.success) throw new Error(json?.message || fallback);
+  return json;
+}
 
 export interface NotificationItem {
   id: number;
@@ -21,32 +32,32 @@ export interface NotificationItem {
 }
 
 export const notificationService = {
-  getMyNotifications: async (limit = 30): Promise<{ success: boolean; data: NotificationItem[]; unread_count: number }> => {
+  getMyNotifications: async (limit = 30, options: NotificationRequestOptions = {}): Promise<{ success: boolean; data: NotificationItem[]; unread_count: number }> => {
     const res = await fetch(`${config.baseURL}/notifications?limit=${limit}`, {
-      headers: getAuthHeader(),
+      headers: getAuthHeader(options.token),
+      signal: options.signal,
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.message || 'Lỗi tải thông báo');
-    return json;
+    const result = await readResponse<{ success: boolean; data: NotificationItem[]; unread_count: number }>(res, 'Không tải được thông báo. Vui lòng thử lại.');
+    if (!Array.isArray(result.data) || !Number.isInteger(result.unread_count) || result.unread_count < 0)
+      throw new Error('Dữ liệu thông báo chưa hợp lệ. Vui lòng thử lại.');
+    return result;
   },
 
-  markAsRead: async (id: number): Promise<{ success: boolean }> => {
+  markAsRead: async (id: number, options: NotificationRequestOptions = {}): Promise<{ success: boolean }> => {
     const res = await fetch(`${config.baseURL}/notifications/${id}/read`, {
       method: 'PUT',
-      headers: getAuthHeader(),
+      headers: getAuthHeader(options.token),
+      signal: options.signal,
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.message || 'Lỗi cập nhật');
-    return json;
+    return readResponse(res, 'Không đánh dấu đã đọc được. Vui lòng thử lại.');
   },
 
-  markAllAsRead: async (): Promise<{ success: boolean }> => {
+  markAllAsRead: async (options: NotificationRequestOptions = {}): Promise<{ success: boolean }> => {
     const res = await fetch(`${config.baseURL}/notifications/read-all`, {
       method: 'PUT',
-      headers: getAuthHeader(),
+      headers: getAuthHeader(options.token),
+      signal: options.signal,
     });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.message || 'Lỗi cập nhật');
-    return json;
+    return readResponse(res, 'Không đánh dấu tất cả đã đọc được. Vui lòng thử lại.');
   },
 };

@@ -31,7 +31,7 @@ const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
 
 const formatCurrency = (value = 0) => `${money.format(value)} đ`;
 const formatCompactMoney = (value = 0) => (value >= 1000000 ? `${Math.round(value / 1000000)}tr` : money.format(value));
-const formatTime = (value?: string) => (value ? dayjs(value).format('HH:mm') : '--:--');
+const formatTime = (value?: string) => value?.match(/(?:^|T)(\d{2}:\d{2})/)?.[1] || '--:--';
 const formatDate = (value?: string) => (value ? dayjs(value).format('DD/MM/YYYY') : '');
 
 const emptyOverview = (role: DashboardOverview['role']): DashboardOverview => ({

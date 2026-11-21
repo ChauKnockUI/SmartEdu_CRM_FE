@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Table, Tag, message, Alert, Typography } from 'antd';
 import { ClockCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { financeService } from '../../services/api/finance.service';
 import { classService } from '../../services/api/class.service';
+import { InvoiceDetailDrawer } from './InvoiceDetailDrawer';
 import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as invoiceStatus, isCollectibleInvoice, sumBillingMoney, billingDate } from './billingStatus';
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
@@ -13,13 +14,24 @@ export function InvoicesPage() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
+  const templateRequest = useRef(0);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [createResult, setCreateResult] = useState<any>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
+  const [classesLoading, setClassesLoading] = useState(false);
+  const [classesError, setClassesError] = useState('');
   const [template, setTemplate] = useState<any | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('active');
   const [form] = Form.useForm();
+  const extraEnabled = Form.useWatch('extra_item_enabled', form);
+  const extraAmount = Form.useWatch('extra_item_amount', form);
+  const discount = Form.useWatch('discount_amount', form);
 
   const loadInvoices = async () => {
     try {
@@ -35,31 +47,44 @@ export function InvoicesPage() {
   };
 
   const loadClasses = async () => {
-    const res = await classService.getAll({ limit: 100 });
-    setClasses(res.data || []);
+    setClassesLoading(true); setClassesError('');
+    try {
+      const res = await classService.getAll({ page: 1, limit: 100 });
+      let all = res.data || [];
+      for (let page = 2; page <= (res.pagination?.totalPages || 1); page++) {
+        const next = await classService.getAll({ page, limit: 100 });
+        all = all.concat(next.data || []);
+      }
+      setClasses(all);
+    } catch (err: any) { setClasses([]); setClassesError(err.message || 'Không tải được danh sách lớp'); }
+    finally { setClassesLoading(false); }
   };
 
   useEffect(() => {
     loadInvoices();
-    loadClasses().catch(() => undefined);
+    loadClasses();
   }, []);
 
   const handleClassChange = async (classId: number) => {
+    const request = ++templateRequest.current;
+    setTemplateLoading(true);
     form.setFieldsValue({ student_ids: [] });
     setSelectedStudentIds([]);
     setTemplate(null);
     try {
       const res = await financeService.getClassFeeTemplate(classId);
+      if (request !== templateRequest.current) return;
       setTemplate(res.data);
     } catch (err: any) {
-      message.error(err.message || 'Không tải được cấu hình phí của lớp');
-    }
+      if (request === templateRequest.current) message.error(err.message || 'Không tải được cấu hình phí của lớp');
+    } finally { if (request === templateRequest.current) setTemplateLoading(false); }
   };
 
   const templateTotal = useMemo(
     () => (template?.items || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0),
     [template]
   );
+  const totalFee = Math.round((templateTotal + (extraEnabled ? Number(extraAmount || 0) : 0)) * 100) / 100;
 
   const rows = useMemo(() => invoices
     .map((invoice) => ({ ...invoice, view_status: invoiceStatus(invoice) }))
@@ -96,6 +121,8 @@ export function InvoicesPage() {
   }, [invoices]);
 
   const submitCreate = async () => {
+    if (creatingRef.current || templateLoading || !template) return;
+    creatingRef.current = true; setCreating(true);
     try {
       const values = await form.validateFields();
       const studentIds = Array.isArray(values.student_ids)
@@ -129,16 +156,19 @@ export function InvoicesPage() {
           })
         : await financeService.createInvoicesForClass(payload);
 
-      const skipped = res.data?.skipped?.length || 0;
-      message.success(skipped ? `Đã tạo invoice, bỏ qua ${skipped} học viên đã có invoice` : 'Đã tạo invoice');
+      const skipped = res.data?.skipped || [];
+      const created = res.data?.created?.length ?? 1;
+      setCreateResult(skipped.length ? { created, skipped } : null);
+      if (skipped.length) message.warning(`Đã tạo ${created} khoản thu; ${skipped.length} học viên chưa được tạo. Xem lý do bên dưới.`);
+      else message.success(`Đã tạo ${created} khoản phải thu`);
       setCreateOpen(false);
       form.resetFields();
       setTemplate(null);
       setSelectedStudentIds([]);
       loadInvoices();
     } catch (err: any) {
-      message.error(err.message || 'Tạo khoản phải thu thất bại');
-    }
+      if (!err.errorFields) message.error(err.message || 'Tạo khoản phải thu thất bại');
+    } finally { creatingRef.current = false; setCreating(false); }
   };
 
   const columns: ColumnsType<any> = [
@@ -162,7 +192,7 @@ export function InvoicesPage() {
       ),
     },
     {
-      title: 'Lớp / Invoice',
+      title: 'Lớp / Khoản phải thu',
       width: 240,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -176,6 +206,7 @@ export function InvoicesPage() {
     { title: 'Còn lại', dataIndex: 'remaining_amount', align: 'right', render: (value) => <Typography.Text strong>{money(value)}</Typography.Text> },
     { title: 'Hạn thu', dataIndex: 'due_date', render: billingDate },
     { title: 'Trạng thái', render: (_, record) => <BillingStatusTag status={record.view_status} /> },
+    { title: '', render: (_, record) => <Button type="link" onClick={() => setDetailId(record.id)}>Chi tiết</Button> },
   ];
 
   return (
@@ -185,17 +216,20 @@ export function InvoicesPage() {
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'Tài chính' },
-          { title: 'Invoices' },
+          { title: 'Khoản phải thu' },
         ]}
         actions={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadInvoices}>Tải lại</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>Tạo invoice theo lớp</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>Tạo khoản phải thu theo lớp</Button>
           </Space>
         }
       />
 
       {loadError && <Alert className="mb-4" type="error" showIcon message={loadError} />}
+      {createResult && <Alert className="mb-4" type="warning" showIcon closable onClose={() => setCreateResult(null)}
+        message={`Đã tạo ${createResult.created} khoản thu; ${createResult.skipped.length} học viên chưa được tạo`}
+        description={<ul>{createResult.skipped.map((item: any) => <li key={item.student_id}>{item.student_name || `#${item.student_id}`}: {item.reason}</li>)}</ul>} />}
       <Card>
         {!loadError && <Row gutter={16} className="mb-4">
           <Col xs={24} sm={12} lg={6}>
@@ -216,7 +250,7 @@ export function InvoicesPage() {
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="Tìm học viên, SĐT, email, lớp, invoice"
+            placeholder="Tìm học viên, SĐT, email, lớp, mã khoản thu"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             style={{ width: 360 }}
@@ -249,17 +283,24 @@ export function InvoicesPage() {
         />
       </Card>
 
+      <InvoiceDetailDrawer invoiceId={detailId} onClose={() => setDetailId(null)} onChanged={loadInvoices} />
+
       <Modal
         title="Tạo khoản phải thu theo lớp"
         open={createOpen}
         width={760}
-        onCancel={() => setCreateOpen(false)}
+        onCancel={() => { templateRequest.current++; setTemplateLoading(false); setCreateOpen(false); form.resetFields(); setTemplate(null); setSelectedStudentIds([]); }}
         onOk={submitCreate}
-        okText="Tạo invoice"
+        confirmLoading={creating}
+        okButtonProps={{ disabled: !template || templateLoading }}
+        cancelButtonProps={{ disabled: creating }} closable={!creating} maskClosable={!creating} keyboard={!creating}
+        okText="Tạo khoản phải thu"
       >
-        <Form form={form} layout="vertical" initialValues={{ mode: 'all', discount_amount: 0, extra_item_type: 'material' }}>
+        <Form form={form} disabled={creating} layout="vertical" initialValues={{ mode: 'all', discount_amount: 0, extra_item_type: 'material' }}>
+          {classesError && <Alert className="mb-4" type="error" message={classesError} action={<Button loading={classesLoading} onClick={loadClasses}>Thử lại</Button>} />}
           <Form.Item name="class_id" label="Lớp" rules={[{ required: true }]}>
             <Select
+              loading={classesLoading}
               showSearch
               placeholder="Chọn lớp"
               optionFilterProp="label"
@@ -271,12 +312,13 @@ export function InvoicesPage() {
             />
           </Form.Item>
 
+          {templateLoading && <Typography.Paragraph type="secondary">Đang tải mẫu phí…</Typography.Paragraph>}
           {template && (
             <Alert
               className="mb-4"
               type="info"
               showIcon
-              message={`Mẫu phí: ${money(templateTotal)} cho ${template.students?.length || 0} học viên đang active`}
+              message={`Mẫu phí: ${money(templateTotal)} cho ${template.students?.length || 0} học viên đang ghi danh`}
               description={
                 <Space direction="vertical" size={2}>
                   {(template.items || []).map((item: any, index: number) => (
@@ -287,10 +329,11 @@ export function InvoicesPage() {
             />
           )}
 
-          <Form.Item name="mode" label="Phạm vi tạo invoice" rules={[{ required: true }]}>
+          <Form.Item name="mode" label="Phạm vi tạo khoản phải thu" rules={[{ required: true }]}>
             <Select
+              onChange={() => { form.setFieldValue('student_ids', undefined); setSelectedStudentIds([]); }}
               options={[
-                { label: 'Tất cả học viên active trong lớp', value: 'all' },
+                { label: 'Tất cả học viên đang ghi danh trong lớp', value: 'all' },
                 { label: 'Chọn nhiều học viên', value: 'selected' },
                 { label: 'Một học viên', value: 'single' },
               ]}
@@ -306,7 +349,7 @@ export function InvoicesPage() {
                 <Form.Item
                   name="student_ids"
                   label="Học viên"
-                  rules={[{ required: true, message: 'Chọn học viên cần tạo invoice' }]}
+                  rules={[{ required: true, message: 'Chọn học viên cần tạo khoản phải thu' }]}
                 >
                   <Select
                     mode={mode === 'single' ? undefined : 'multiple'}
@@ -327,8 +370,9 @@ export function InvoicesPage() {
             <Form.Item name="due_date" label="Hạn thu" className="flex-1">
               <DatePicker className="w-full" />
             </Form.Item>
-            <Form.Item name="discount_amount" label="Giảm giá" className="flex-1">
-              <InputNumber min={0} className="w-full" />
+            <Form.Item name="discount_amount" label="Giảm giá" className="flex-1" dependencies={['extra_item_enabled', 'extra_item_amount', 'class_id']}
+              rules={[{ type: 'number', min: 0, max: totalFee, message: 'Giảm giá không được vượt tổng các khoản phí.' }]}>
+              <InputNumber min={0} max={totalFee} precision={2} className="w-full" />
             </Form.Item>
           </Space>
 
@@ -355,15 +399,16 @@ export function InvoicesPage() {
                   />
                 </Form.Item>
                 <Form.Item name="extra_item_description" label="Mô tả phí thêm" rules={[{ required: true }]}>
-                  <Input />
+                  <Input maxLength={255} />
                 </Form.Item>
                 <Form.Item name="extra_item_amount" label="Số tiền phí thêm" rules={[{ required: true }]}>
-                  <InputNumber min={1} className="w-full" />
+                  <InputNumber min={0.01} precision={2} className="w-full" />
                 </Form.Item>
               </Space>
             ) : null}
           </Form.Item>
 
+          {template && <Typography.Paragraph>Phải thu mỗi học viên sau giảm giá: <strong>{money(Math.max(totalFee - Number(discount || 0), 0))}</strong></Typography.Paragraph>}
           <Form.Item name="notes" label="Ghi chú">
             <Input.TextArea rows={3} />
           </Form.Item>

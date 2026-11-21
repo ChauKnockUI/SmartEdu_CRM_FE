@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
-  Badge,
   Card,
   message,
   Select,
@@ -49,6 +48,7 @@ import { scheduleService } from '@/services/api/schedule.service';
 import { classService } from '@/services/api/class.service';
 import { teacherService } from '@/services/api/teacher.service';
 import { roomService } from '@/services/api/room.service';
+import { SessionAttendanceTag, SessionStatusTag, type SessionChangeState } from './sessionStatus';
 
 dayjs.locale('vi');
 
@@ -63,6 +63,7 @@ interface ScheduleItem {
   status: string;
   notes?: string | null;
   memo?: string | null;
+  scheduleChange?: SessionChangeState;
   class?: {
     id: number;
     name: string;
@@ -90,23 +91,20 @@ const formatTime = (timeVal?: string | null) => {
   return text;
 };
 
-export const isScheduleOverdue = (item: ScheduleItem) => {
-  if (item.status === 'cancelled') return false;
-  if (item.attendances && item.attendances.length > 0) return false;
-  const now = dayjs();
-  const itemDateStr = dayjs(item.date).format('YYYY-MM-DD');
-  const todayStr = now.format('YYYY-MM-DD');
-  if (itemDateStr < todayStr) return true;
-  if (itemDateStr === todayStr && item.end_time) {
-    const endStr = formatTime(item.end_time);
-    if (endStr) {
-      const [hours, minutes] = endStr.split(':').map(Number);
-      const sessionEnd = dayjs().hour(hours).minute(minutes).second(0);
-      return now.isAfter(sessionEnd);
-    }
-  }
-  return false;
+const schedulePeriod = (item: ScheduleItem) => {
+  if (!item.start_time || !item.end_time) return null;
+  const date = item.date.slice(0, 10);
+  const start = new Date(`${date}T${formatTime(item.start_time)}:00+07:00`).getTime();
+  const end = new Date(`${date}T${formatTime(item.end_time)}:00+07:00`).getTime();
+  return Number.isFinite(start) && Number.isFinite(end) && end > start ? { start, end } : null;
 };
+export const canRemindSchedule = (item: ScheduleItem, now = Date.now()) => {
+  const period = schedulePeriod(item);
+  return item.status !== 'cancelled' && item.class?.status !== 'cancelled' && !item.attendances?.length
+    && !!period && now >= period.start;
+};
+export const isScheduleOverdue = (item: ScheduleItem, now = Date.now()) =>
+  canRemindSchedule(item, now) && now >= schedulePeriod(item)!.end;
 
 export function SchedulePage() {
   const navigate = useNavigate();
@@ -171,7 +169,8 @@ export function SchedulePage() {
     try {
       setRemindingId(session.id);
       const res = await scheduleService.remindAttendance(session.id);
-      message.success(res.message || 'Đã gửi thông báo nhắc giảng viên điểm danh!');
+      if (res.data?.sent === false) message.info(res.message);
+      else message.success(res.message || 'Đã gửi thông báo nhắc giảng viên điểm danh!');
     } catch (err: any) {
       message.error(err.message || 'Không thể gửi thông báo nhắc điểm danh');
     } finally {
@@ -210,22 +209,24 @@ export function SchedulePage() {
 
       // Lọc theo giáo viên (ưu tiên giáo viên của buổi, nếu không có thì lấy GV lớp)
       if (selectedTeacherId) {
-        const assignedTeacherId = item.teacher_id || item.class?.teacher?.id;
+        const assignedTeacherId = item.teacher_id;
         if (assignedTeacherId !== selectedTeacherId) return false;
       }
 
       // Lọc theo phòng học (ưu tiên phòng của buổi, nếu không có thì lấy phòng lớp)
       if (selectedRoomId) {
-        const assignedRoomId = item.room_id || item.class?.room?.id;
+        const assignedRoomId = item.room_id;
         if (assignedRoomId !== selectedRoomId) return false;
       }
 
       // Lọc theo trạng thái điểm danh / hủy / quá hạn
       if (selectedStatus) {
-        if (selectedStatus === 'attended' && (!item.attendances || item.attendances.length === 0)) {
+        if (selectedStatus === 'pending_makeup' && !item.scheduleChange?.pendingMakeup) return false;
+        if (selectedStatus === 'makeup' && !item.scheduleChange?.isMakeup) return false;
+        if (selectedStatus === 'attended' && (item.status === 'cancelled' || !item.attendances?.length)) {
           return false;
         }
-        if (selectedStatus === 'unattended' && item.attendances && item.attendances.length > 0) {
+        if (selectedStatus === 'unattended' && (item.status === 'cancelled' || !!item.attendances?.length)) {
           return false;
         }
         if (selectedStatus === 'overdue' && !isScheduleOverdue(item)) {
@@ -263,9 +264,8 @@ export function SchedulePage() {
     const todaySessions = filteredSchedules.filter(
       (s) => dayjs(s.date).format('YYYY-MM-DD') === todayStr
     );
-    const attended = filteredSchedules.filter(
-      (s) => s.attendances && s.attendances.length > 0
-    ).length;
+    const activeSessions = filteredSchedules.filter(s => s.status !== 'cancelled');
+    const attended = activeSessions.filter(s => s.attendances?.length).length;
     const overdueCount = filteredSchedules.filter(isScheduleOverdue).length;
     const activeClasses = new Set(filteredSchedules.map((s) => s.class_id).filter(Boolean)).size;
 
@@ -273,7 +273,7 @@ export function SchedulePage() {
       total,
       todayCount: todaySessions.length,
       attended,
-      attendedRate: total > 0 ? Math.round((attended / total) * 100) : 0,
+      attendedRate: activeSessions.length ? Math.round(attended / activeSessions.length * 100) : 0,
       overdueCount,
       activeClasses,
     };
@@ -325,10 +325,8 @@ export function SchedulePage() {
           const isAttended = item.attendances && item.attendances.length > 0;
           const isCancelled = item.status === 'cancelled';
           const timeStr = item.start_time ? formatTime(item.start_time) : '';
-          const roomName = item.room?.name || item.class?.room?.name || '';
-          const teacherName = item.teacher?.full_name || item.class?.teacher?.full_name || '';
-
-          const badgeColor = isCancelled ? 'red' : isAttended ? 'green' : 'blue';
+          const roomName = item.room?.name || '';
+          const teacherName = item.teacher?.full_name || '';
 
           const popoverContent = (
             <div className="text-xs space-y-1.5 p-1 max-w-xs">
@@ -350,9 +348,7 @@ export function SchedulePage() {
                 <span>{teacherName || 'Chưa xếp giảng viên'}</span>
               </div>
               <div className="mt-2 pt-2 border-t flex justify-between items-center">
-                <Tag color={badgeColor}>
-                  {isCancelled ? 'Đã hủy' : isAttended ? 'Đã điểm danh' : 'Chưa điểm danh'}
-                </Tag>
+                <SessionStatusTag status={item.status} scheduleChange={item.scheduleChange} />
                 <Button
                   type="link"
                   size="small"
@@ -448,7 +444,7 @@ export function SchedulePage() {
       title: 'Giảng viên',
       key: 'teacher',
       render: (_: any, row: ScheduleItem) => {
-        const teacherName = row.teacher?.full_name || row.class?.teacher?.full_name;
+        const teacherName = row.teacher?.full_name;
         return teacherName ? (
           <Space size={4} className="text-xs text-gray-800">
             <UserOutlined className="text-purple-600" />
@@ -463,7 +459,7 @@ export function SchedulePage() {
       title: 'Phòng học',
       key: 'room',
       render: (_: any, row: ScheduleItem) => {
-        const roomName = row.room?.name || row.class?.room?.name;
+        const roomName = row.room?.name;
         return roomName ? (
           <Tag color="cyan" className="font-medium">
             <HomeOutlined className="mr-1" />
@@ -479,6 +475,7 @@ export function SchedulePage() {
       key: 'attendance',
       width: 170,
       render: (_: any, row: ScheduleItem) => {
+        if (row.status === 'cancelled') return <SessionAttendanceTag status="cancelled" />;
         const isAttended = row.attendances && row.attendances.length > 0;
         const isOverdue = isScheduleOverdue(row);
         if (isAttended) {
@@ -503,18 +500,13 @@ export function SchedulePage() {
       dataIndex: 'status',
       key: 'status',
       width: 120,
-      render: (status: string) => {
-        if (status === 'cancelled') return <Tag color="red">Đã hủy</Tag>;
-        if (status === 'completed') return <Tag color="blue">Đã kết thúc</Tag>;
-        return <Tag color="processing">Lên lịch</Tag>;
-      },
+      render: (status: string, row: ScheduleItem) => <SessionStatusTag status={status} scheduleChange={row.scheduleChange} />,
     },
     {
       title: 'Thao tác',
       key: 'action',
       width: 220,
       render: (_: any, row: ScheduleItem) => {
-        const isAttended = row.attendances && row.attendances.length > 0;
         const isOverdue = isScheduleOverdue(row);
         return (
           <Space size="small">
@@ -523,9 +515,9 @@ export function SchedulePage() {
               type="primary"
               onClick={() => navigate(`/lms/sessions/${row.id}`)}
             >
-              Điểm danh
+              Xem điểm danh
             </Button>
-            {!isAttended && row.status !== 'cancelled' && (
+            {canRemindSchedule(row) && (
               <Tooltip title={isOverdue ? 'Quá giờ dạy nhưng chưa điểm danh. Nhấn để gửi thông báo nhắc giảng viên ngay' : 'Gửi thông báo nhắc giảng viên điểm danh'}>
                 <Button
                   size="small"
@@ -725,15 +717,17 @@ export function SchedulePage() {
             {/* Trạng thái điểm danh */}
             <Select
               allowClear
-              placeholder="Trạng thái điểm danh"
+              placeholder="Trạng thái buổi / điểm danh"
               style={{ width: 200 }}
               value={selectedStatus}
-              onChange={setSelectedStatus}
+              onChange={value => { setSelectedStatus(value); if (value === 'pending_makeup') { setViewMode('table'); setDateRange(null); } }}
               options={[
                 { label: 'Đã điểm danh', value: 'attended' },
                 { label: 'Chưa điểm danh', value: 'unattended' },
                 { label: `⚠️ Quá hạn điểm danh (${totalOverdueAcrossAll})`, value: 'overdue' },
                 { label: 'Đã hủy', value: 'cancelled' },
+                { label: 'Chờ xếp học bù', value: 'pending_makeup' },
+                { label: 'Buổi học bù', value: 'makeup' },
               ]}
             />
 
@@ -834,7 +828,6 @@ export function SchedulePage() {
               <Empty description="Không có buổi học nào trong ngày này" />
             ) : (
               getDaySessions(dayDrawerDate).map((session) => {
-                const isAttended = session.attendances && session.attendances.length > 0;
                 return (
                   <Card
                     key={session.id}
@@ -846,9 +839,8 @@ export function SchedulePage() {
                       <div className="font-semibold text-base text-gray-900">
                         {session.class?.name || 'Buổi học'}
                       </div>
-                      <Tag color={isAttended ? 'green' : 'blue'}>
-                        {isAttended ? 'Đã điểm danh' : 'Chưa điểm danh'}
-                      </Tag>
+                      <Space size={0} wrap><SessionStatusTag status={session.status} scheduleChange={session.scheduleChange} />
+                        <SessionAttendanceTag status={session.status} attendances={session.attendances} /></Space>
                     </div>
 
                     <div className="space-y-1 text-sm text-gray-600 mb-3">
@@ -860,18 +852,18 @@ export function SchedulePage() {
                       </div>
                       <div className="flex items-center gap-2">
                         <HomeOutlined className="text-amber-500" />
-                        <span>{session.room?.name || session.class?.room?.name || 'Chưa xếp phòng'}</span>
+                        <span>{session.room?.name || 'Chưa xếp phòng'}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <UserOutlined className="text-purple-500" />
                         <span>
-                          {session.teacher?.full_name || session.class?.teacher?.full_name || 'Chưa xếp giảng viên'}
+                          {session.teacher?.full_name || 'Chưa xếp giảng viên'}
                         </span>
                       </div>
                     </div>
 
                     <div className="flex justify-end gap-2 pt-2 border-t">
-                      {!isAttended && session.status !== 'cancelled' && (
+                      {canRemindSchedule(session) && (
                         <Button
                           size="small"
                           danger={isScheduleOverdue(session)}
@@ -916,7 +908,7 @@ export function SchedulePage() {
           <Button key="close" onClick={() => setModalOpen(false)}>
             Đóng
           </Button>,
-          selectedSession && (!selectedSession.attendances || selectedSession.attendances.length === 0) && selectedSession.status !== 'cancelled' && (
+          selectedSession && canRemindSchedule(selectedSession) && (
             <Button
               key="remind"
               danger={isScheduleOverdue(selectedSession)}
@@ -955,21 +947,7 @@ export function SchedulePage() {
                   </p>
                 )}
               </div>
-              <Tag
-                color={
-                  selectedSession.status === 'cancelled'
-                    ? 'red'
-                    : selectedSession.attendances && selectedSession.attendances.length > 0
-                    ? 'green'
-                    : 'blue'
-                }
-              >
-                {selectedSession.status === 'cancelled'
-                  ? 'Đã hủy'
-                  : selectedSession.attendances && selectedSession.attendances.length > 0
-                  ? 'Đã điểm danh'
-                  : 'Lên lịch'}
-              </Tag>
+              <SessionStatusTag status={selectedSession.status} scheduleChange={selectedSession.scheduleChange} />
             </div>
 
             <Row gutter={[16, 16]}>
@@ -999,7 +977,7 @@ export function SchedulePage() {
                     <HomeOutlined /> Phòng học
                   </div>
                   <div className="font-semibold text-gray-800">
-                    {selectedSession.room?.name || selectedSession.class?.room?.name || (
+                    {selectedSession.room?.name || (
                       <span className="text-gray-400 italic">Chưa phân phòng</span>
                     )}
                   </div>
@@ -1011,8 +989,7 @@ export function SchedulePage() {
                     <UserOutlined /> Giảng viên phụ trách
                   </div>
                   <div className="font-semibold text-gray-800">
-                    {selectedSession.teacher?.full_name ||
-                      selectedSession.class?.teacher?.full_name || (
+                    {selectedSession.teacher?.full_name || (
                         <span className="text-gray-400 italic">Chưa phân công</span>
                       )}
                   </div>

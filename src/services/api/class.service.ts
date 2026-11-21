@@ -3,7 +3,7 @@ import { getApiConfig } from './apiConfig';
 const config = getApiConfig();
 
 export interface ClassFilterOptions {
-  courses: { id: number; name: string }[];
+  courses: { id: number; name: string; is_active?: boolean; total_sessions?: number | null }[];
   teachers: { id: number; full_name: string }[];
 }
 
@@ -115,13 +115,14 @@ export const classService = {
     return json;
   },
 
-  checkConflicts: async (classId: number, studentIds: number[]) => {
+  checkConflicts: async (classId: number, studentIds: number[], signal?: AbortSignal) => {
     const res = await fetch(`${config.baseURL}/classes/${classId}/check-conflicts`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify({
         student_ids: studentIds,
       }),
+      signal,
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.message || 'Không thể kiểm tra xung đột lịch học');

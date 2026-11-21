@@ -1,5 +1,28 @@
 import { getApiConfig } from './apiConfig';
 
+export interface ScheduleChange {
+  isMakeup?: boolean;
+  canCancel: boolean;
+  canMakeup: boolean;
+  pendingMakeup: boolean;
+  history: {
+    action: 'cancel' | 'makeup';
+    date: string;
+    start_time: string | null;
+    end_time: string | null;
+    reason: string;
+    at: string;
+  }[];
+}
+
+export interface MakeupSchedulePayload {
+  date: string;
+  start_time: string;
+  end_time: string;
+  reason: string;
+  room_id?: number;
+}
+
 const config = getApiConfig();
 
 const getAuthHeader = () => ({
@@ -9,6 +32,30 @@ const getAuthHeader = () => ({
 });
 
 export const scheduleService = {
+  cancel: async (id: number, payload: { reason: string }, signal?: AbortSignal) => {
+    const res = await fetch(`${config.baseURL}/schedules/${id}/cancel`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify(payload),
+      signal,
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.message || 'Không thể ghi nhận buổi nghỉ.');
+    return json;
+  },
+
+  makeup: async (id: number, payload: MakeupSchedulePayload, signal?: AbortSignal) => {
+    const res = await fetch(`${config.baseURL}/schedules/${id}/makeup`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify(payload),
+      signal,
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.message || 'Không thể xếp lịch học bù.');
+    return json;
+  },
+
   getAll: async (params?: {
     start_date?: string;
     end_date?: string;

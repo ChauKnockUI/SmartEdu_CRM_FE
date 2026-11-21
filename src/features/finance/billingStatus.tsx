@@ -14,6 +14,10 @@ export const getInvoiceStatus = (invoice: any) => billingStatusMeta[invoice?.col
 export const isCollectibleInvoice = (invoice: any) => ['pending', 'partial', 'overdue'].includes(getInvoiceStatus(invoice)) && Number(invoice.remaining_amount) > 0;
 export const invoiceCollectionLink = (id: number) => `/finance/payments?invoice_id=${id}`;
 export const billingDate = (value?: string | null) => value ? new Date(value).toLocaleDateString('vi-VN', { timeZone: 'UTC' }) : '—';
+// Translate known automatic notes for old records without rewriting stored notes.
+export const billingNote = (value?: string | null) => (value || '')
+  .replace(/^Auto-created when student was enrolled into class(?=\r?\n|$)/, 'Khoản thu được tạo tự động khi ghi danh vào lớp')
+  .replace(/^Auto-created from Lead #(\d+)(?=\r?\n|$)/, 'Khoản thu được tạo tự động từ khách hàng tiềm năng #$1');
 export const sumBillingMoney = (items: any[], field: string) => items.reduce((sum, item) => sum + Math.round(Number(item[field] || 0) * 100), 0) / 100;
 export function BillingStatusTag({ status, remaining }: { status?: string; remaining?: number }) {
   const meta = billingStatusMeta[status || 'unknown'] || billingStatusMeta.unknown;

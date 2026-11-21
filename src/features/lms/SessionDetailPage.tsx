@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -17,7 +17,7 @@ import {
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloseCircleOutlined,
-  ExclamationCircleOutlined,
+  ReloadOutlined,
   SaveOutlined,
   BellOutlined,
 } from '@ant-design/icons';
@@ -25,10 +25,12 @@ import { PageHeader } from '../../shared/components/PageHeader';
 import { useParams } from 'react-router';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { attendanceService } from '../../services/api/attendance.service';
-import { scheduleService } from '../../services/api/schedule.service';
+import { scheduleService, type ScheduleChange } from '../../services/api/schedule.service';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import dayjs from 'dayjs';
+import { SessionStatusTag } from './sessionStatus';
+import { SessionScheduleActions } from './SessionScheduleActions';
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
@@ -37,7 +39,7 @@ interface AttendanceRecord {
   student_id: number;
   studentName: string;
   email?: string;
-  status: AttendanceStatus;
+  status: AttendanceStatus | null;
   notes: string;
   is_attendance_unlocked?: boolean;
 }
@@ -49,6 +51,11 @@ interface SessionData {
   endTime: Date | null;
   className: string;
   teacherName: string;
+  roomName?: string;
+  status: string;
+  scheduleChange?: ScheduleChange;
+  attendanceAccess: { canMark: boolean; blockReason: string; canRequestUnlock: boolean;
+    timeLocked: boolean; cancelled: boolean; notStarted: boolean };
   lessonContent?: string | null;
   notes?: string | null;
   is_attendance_unlocked?: boolean;
@@ -81,7 +88,14 @@ export function SessionDetailPage() {
   const permissions = usePermissions();
 
   const [loading, setLoading] = useState(true);
-  const [sessionData, setSessionData] = useState<SessionData | null>(null);
+  const scope = `${user?.id}:${role}:${scheduleId}`;
+  const currentScope = useRef(scope); currentScope.current = scope;
+  const requestId = useRef(0);
+  const fetchAbort = useRef<AbortController | null>(null);
+  const [loadedScope, setLoadedScope] = useState('');
+  const [loadedSession, setSessionData] = useState<SessionData | null>(null);
+  const sessionData = loadedScope === scope ? loadedSession : null;
+  const [loadError, setLoadError] = useState('');
   const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
   const [lessonContent, setLessonContent] = useState('');
   const [editMode, setEditMode] = useState(false);
@@ -89,75 +103,87 @@ export function SessionDetailPage() {
   const [reminding, setReminding] = useState(false);
   const [togglingUnlock, setTogglingUnlock] = useState(false);
   const [requestingUnlock, setRequestingUnlock] = useState(false);
+  const [unlockRequested, setUnlockRequested] = useState(false);
+  const [scheduleActionActive, setScheduleActionActive] = useState(false);
+  const savingRef = useRef(false);
 
 
-  const canEditAttendance = permissions.canTakeAttendance && role === 'teacher';
-  const canViewFullAttendance = role === 'teacher';
-  const canViewAbsenceList = role === 'admin' || role === 'student';
+  const access = sessionData?.attendanceAccess;
+  const canEditAttendance = permissions.canTakeAttendance && role === 'teacher' && !!access?.canMark;
+  const canViewFullAttendance = role === 'teacher' || role === 'admin' || role === 'sale';
+  const canViewAbsenceList = role === 'admin';
 
   const handleRemindTeacher = async () => {
     try {
       setReminding(true);
       const res = await scheduleService.remindAttendance(Number(scheduleId));
-      message.success(res.message || 'Đã gửi thông báo nhắc giảng viên điểm danh thành công!');
+      if (scope !== currentScope.current) return;
+      if (res.data?.sent === false) message.info(res.message);
+      else message.success(res.message || 'Đã gửi thông báo nhắc giảng viên điểm danh thành công!');
     } catch (err: any) {
-      message.error(err.message || 'Lỗi gửi nhắc điểm danh');
+      if (scope === currentScope.current) message.error(err.message || 'Lỗi gửi nhắc điểm danh');
     } finally {
-      setReminding(false);
+      if (scope === currentScope.current) setReminding(false);
     }
   };
 
-  const isLockedByTime = useMemo(() => {
-    if (!sessionData) return false;
-    let start = new Date(sessionData.date);
-    if (sessionData.startTime) {
-      const st = new Date(sessionData.startTime);
-      start.setHours(st.getHours(), st.getMinutes(), 0, 0);
-    }
-    const diffHours = (Date.now() - start.getTime()) / (1000 * 60 * 60);
-    return diffHours > 48;
-  }, [sessionData]);
+  const isLockedByTime = !!access?.timeLocked;
 
   const handleToggleUnlock = async (unlock: boolean) => {
     try {
       setTogglingUnlock(true);
       const res = await attendanceService.toggleUnlock(Number(scheduleId), unlock);
+      if (scope !== currentScope.current) return;
+      window.dispatchEvent(new Event('crm:notifications-changed'));
       message.success(res.message);
-      setSessionData((prev) => (prev ? { ...prev, is_attendance_unlocked: unlock } : null));
+      await fetchSessionAttendance();
     } catch (err: any) {
-      message.error(err.message || 'Thao tác thất bại');
+      if (scope === currentScope.current) message.error(err.message || 'Thao tác thất bại');
     } finally {
-      setTogglingUnlock(false);
+      if (scope === currentScope.current) setTogglingUnlock(false);
     }
   };
 
   const handleRequestUnlock = async () => {
+    if (!access?.canRequestUnlock || requestingUnlock || unlockRequested) return;
     try {
       setRequestingUnlock(true);
       const res = await attendanceService.requestUnlock(Number(scheduleId));
+      if (scope !== currentScope.current) return;
+      setUnlockRequested(true);
       message.success(res.message);
     } catch (err: any) {
-      message.error(err.message || 'Lỗi gửi yêu cầu');
+      if (scope === currentScope.current) message.error(err.message || 'Lỗi gửi yêu cầu');
     } finally {
-      setRequestingUnlock(false);
+      if (scope === currentScope.current) setRequestingUnlock(false);
     }
   };
 
   useEffect(() => {
-    if (scheduleId) {
-      fetchSessionAttendance();
-    }
-  }, [scheduleId]);
+    currentScope.current = scope;
+    setSessionData(null); setLoadedScope(''); setAttendance([]); setLessonContent(''); setLoadError('');
+    setEditMode(false); setSaving(false); setReminding(false); setTogglingUnlock(false); setRequestingUnlock(false); setUnlockRequested(false);
+    setScheduleActionActive(false);
+    fetchSessionAttendance();
+    return () => { requestId.current++; fetchAbort.current?.abort(); if (currentScope.current === scope) currentScope.current = ''; };
+  }, [scope]);
 
   const fetchSessionAttendance = async () => {
+    const request = ++requestId.current;
+    fetchAbort.current?.abort();
+    const controller = new AbortController(); fetchAbort.current = controller;
     try {
       setLoading(true);
+      setLoadError('');
 
-      const res = await attendanceService.getSessionAttendance(Number(scheduleId));
+      const res = await attendanceService.getSessionAttendance(Number(scheduleId), controller.signal);
+      if (scope !== currentScope.current || request !== requestId.current || controller.signal.aborted) return;
+      if (!res.success || !res.data) throw new Error('Không tìm thấy buổi học trong phạm vi được xem.');
 
       if (res.success && res.data) {
         const data: SessionData = res.data;
         setSessionData(data);
+        setLoadedScope(scope);
 
         setLessonContent(data.lessonContent || data.notes || '');
 
@@ -166,16 +192,18 @@ export function SessionDetailPage() {
           student_id: student.id,
           studentName: student.name,
           email: student.email,
-          status: student.attendance?.status || 'present',
+          status: student.attendance?.status || null,
           notes: student.attendance?.notes || '',
         }));
 
         setAttendance(attendanceRecords);
       }
     } catch (error: any) {
-      message.error(error.message || 'Lỗi tải dữ liệu điểm danh');
+      if (scope === currentScope.current && request === requestId.current && !controller.signal.aborted) {
+        setLoadError(error.message || 'Không tải được dữ liệu điểm danh.'); setSessionData(null); setAttendance([]);
+      }
     } finally {
-      setLoading(false);
+      if (scope === currentScope.current && request === requestId.current) setLoading(false);
     }
   };
 
@@ -197,27 +225,36 @@ export function SessionDetailPage() {
   };
 
   const handleSaveAttendance = async () => {
+    if (!canEditAttendance || savingRef.current) return;
+    const unmarked = attendance.filter(item => !item.status).length;
+    if (!attendance.length || unmarked) {
+      message.warning(unmarked ? `Còn ${unmarked} học viên chưa được chọn trạng thái.` : 'Chưa có học viên để điểm danh.'); return;
+    }
+    savingRef.current = true;
     try {
       setSaving(true);
 
       const attendanceData = attendance.map((rec) => ({
         student_id: rec.student_id,
-        status: rec.status,
+        status: rec.status!,
         notes: rec.notes || undefined,
       }));
 
-      await attendanceService.markAttendance(Number(scheduleId), {
+      const result = await attendanceService.markAttendance(Number(scheduleId), {
         lessonContent,
         attendances: attendanceData,
       });
+      if (scope !== currentScope.current) return;
+      if (result.success) window.dispatchEvent(new Event('crm:notifications-changed'));
 
       message.success('Đã lưu điểm danh thành công');
       setEditMode(false);
       await fetchSessionAttendance();
     } catch (error: any) {
-      message.error(error.message || 'Lỗi lưu điểm danh');
+      if (scope === currentScope.current) message.error(error.message || 'Lỗi lưu điểm danh');
     } finally {
-      setSaving(false);
+      savingRef.current = false;
+      if (scope === currentScope.current) setSaving(false);
     }
   };
 
@@ -231,7 +268,7 @@ export function SessionDetailPage() {
         student_id: student.id,
         studentName: student.name,
         email: student.email,
-        status: student.attendance?.status || 'present',
+        status: student.attendance?.status || null,
         notes: student.attendance?.notes || '',
       })) || [];
 
@@ -261,6 +298,8 @@ export function SessionDetailPage() {
     const late = attendance.filter((a) => a.status === 'late').length;
     const excused = attendance.filter((a) => a.status === 'excused').length;
     const total = attendance.length;
+    const unmarked = attendance.filter(a => !a.status).length;
+    const marked = total - unmarked;
 
     return {
       present,
@@ -268,11 +307,13 @@ export function SessionDetailPage() {
       late,
       excused,
       total,
-      rate: total > 0 ? Math.round(((present + late + excused) / total) * 100) : 0,
+      unmarked,
+      rate: marked > 0 ? Math.round(((present + late) / marked) * 100) : null,
     };
   }, [attendance]);
 
-  const renderStatusTag = (status: AttendanceStatus) => {
+  const renderStatusTag = (status: AttendanceStatus | null) => {
+    if (!status) return <Tag>Chưa điểm danh</Tag>;
     const config = statusConfig[status];
 
     return (
@@ -309,11 +350,13 @@ export function SessionDetailPage() {
       dataIndex: 'status',
       key: 'status',
       width: 170,
-      render: (status: AttendanceStatus, record) => {
+      render: (status: AttendanceStatus | null, record) => {
         if (canEditAttendance && editMode) {
           return (
             <Select
-              value={status}
+              value={status || undefined}
+              placeholder="Chưa điểm danh"
+              disabled={saving}
               style={{ width: '100%' }}
               onChange={(value) => handleAttendanceChange(record.student_id, value)}
               options={[
@@ -337,6 +380,8 @@ export function SessionDetailPage() {
         if (canEditAttendance && editMode) {
           return (
             <Input
+              disabled={saving}
+              maxLength={1000}
               value={notes}
               placeholder="Nhập ghi chú..."
               onChange={(e) => handleNotesChange(record.student_id, e.target.value)}
@@ -365,9 +410,10 @@ export function SessionDetailPage() {
   ];
 
   const buildActions = () => {
+    if (!sessionData || access?.cancelled || access?.notStarted) return null;
     // Dành cho Admin
     if (role === 'admin') {
-      const isAttended = sessionData?.enrolledStudents?.some((s) => s.attendance !== null);
+      const isAttended = sessionData.enrolledStudents.some(s => !!s.attendance);
       return (
         <Space>
           {/* Nút Mở / Khóa quyền điểm danh */}
@@ -375,26 +421,29 @@ export function SessionDetailPage() {
             <Button
               danger
               loading={togglingUnlock}
+              disabled={scheduleActionActive}
               onClick={() => handleToggleUnlock(false)}
             >
               Khóa lại điểm danh
             </Button>
-          ) : (
+          ) : isLockedByTime ? (
             <Button
               type="primary"
               style={{ backgroundColor: '#52c41a' }}
               loading={togglingUnlock}
+              disabled={scheduleActionActive}
               onClick={() => handleToggleUnlock(true)}
             >
               Mở quyền điểm danh cho GV
             </Button>
-          )}
+          ) : null}
 
-          {!isAttended && (
+          {!isAttended && sessionData.enrolledStudents.length > 0 && (
             <Button
               danger
               icon={<BellOutlined />}
               loading={reminding}
+              disabled={scheduleActionActive}
               onClick={handleRemindTeacher}
             >
               Nhắc GV điểm danh
@@ -405,31 +454,31 @@ export function SessionDetailPage() {
     }
 
     // Dành cho Giáo viên
-    if (!canEditAttendance) return null;
-
-    // Nếu quá 48h và chưa được Admin mở khóa
-    if (isLockedByTime && !sessionData?.is_attendance_unlocked) {
+    if (role === 'teacher' && access?.canRequestUnlock) {
       return (
         <Button
           type="primary"
           danger
           icon={<BellOutlined />}
           loading={requestingUnlock}
+          disabled={unlockRequested || scheduleActionActive}
           onClick={handleRequestUnlock}
         >
-          Gửi yêu cầu Admin mở quyền điểm danh
+          {unlockRequested ? 'Đã gửi yêu cầu mở khóa' : 'Yêu cầu Admin mở khóa'}
         </Button>
       );
     }
+    if (!canEditAttendance) return null;
 
     if (!editMode) {
       return (
         <Button
           type="primary"
           icon={<CheckCircleOutlined />}
+          disabled={!attendance.length || scheduleActionActive}
           onClick={() => setEditMode(true)}
         >
-          Bắt đầu điểm danh
+          {sessionData.enrolledStudents.some(s => !!s.attendance) ? 'Chỉnh sửa điểm danh' : 'Bắt đầu điểm danh'}
         </Button>
       );
     }
@@ -444,7 +493,7 @@ export function SessionDetailPage() {
         >
           Lưu điểm danh
         </Button>
-        <Button onClick={handleCancelEdit}>Hủy</Button>
+        <Button disabled={saving} onClick={handleCancelEdit}>Hủy</Button>
       </Space>
     );
   };
@@ -458,12 +507,8 @@ export function SessionDetailPage() {
   }
 
   if (!sessionData) {
-    return (
-      <div className="p-8 text-center">
-        <ExclamationCircleOutlined className="text-4xl text-yellow-500 mb-4" />
-        <h2 className="text-xl font-semibold mb-2">Buổi học không tồn tại</h2>
-      </div>
-    );
+    return <Alert type="error" showIcon message="Không tải được buổi học" description={loadError || 'Vui lòng thử tải lại.'}
+      action={<Button onClick={fetchSessionAttendance}>Thử lại</Button>} />;
   }
 
   return (
@@ -477,14 +522,21 @@ export function SessionDetailPage() {
           { title: 'Chi tiết lớp' },
           { title: 'Điểm danh' },
         ]}
-        actions={buildActions()}
+        actions={<Space wrap><Button icon={<ReloadOutlined />} disabled={editMode || saving || scheduleActionActive} onClick={fetchSessionAttendance}>Tải lại</Button>{buildActions()}</Space>}
       />
 
+      {access?.cancelled && <Alert className="mb-4" showIcon type="warning" message={sessionData.scheduleChange?.pendingMakeup ? 'Buổi học đã nghỉ, đang chờ xếp học bù' : 'Buổi học hoặc lớp học đã hủy'}
+        description="Không thể điểm danh hoặc yêu cầu mở khóa. Kết quả cũ (nếu có) chỉ dùng để tra cứu." />}
+      {access?.notStarted && !access.cancelled && <Alert className="mb-4" showIcon type="info" message="Chưa đến giờ bắt đầu buổi học"
+        description="Bạn có thể xem thông tin. Khi đến giờ học, bấm Tải lại để bắt đầu điểm danh." />}
+      {role === 'teacher' && !access?.canMark && !access?.canRequestUnlock && !access?.cancelled && !access?.notStarted
+        && <Alert className="mb-4" showIcon type="info" message={access?.blockReason || 'Bạn không phụ trách điểm danh buổi học này.'} />}
+
       {/* Cảnh báo dành riêng cho Giáo viên khi bị khóa */}
-      {role === 'teacher' && isLockedByTime && !sessionData?.is_attendance_unlocked && (
+      {role === 'teacher' && access?.canRequestUnlock && (
         <Alert
           message="Buổi học đã bị khóa điểm danh"
-          description="Buổi học này đã kết thúc quá 48 giờ. Vui lòng bấm nút 'Gửi yêu cầu Admin mở quyền điểm danh' ở góc trên để được mở lại quyền."
+          description={unlockRequested ? 'Đã gửi yêu cầu tới Admin. Sau khi được mở khóa, bấm Tải lại để cập nhật.' : 'Đã quá 48 giờ từ lúc bắt đầu buổi học. Bạn có thể bấm Yêu cầu Admin mở khóa ở góc trên.'}
           type="warning"
           showIcon
           className="mb-4"
@@ -492,7 +544,7 @@ export function SessionDetailPage() {
       )}
 
       {/* Thông báo cho Admin biết ca này đang khóa và GV không thể điểm danh nếu Admin chưa bấm mở */}
-      {role === 'admin' && isLockedByTime && !sessionData?.is_attendance_unlocked && (
+      {role === 'admin' && isLockedByTime && !access?.cancelled && !sessionData?.is_attendance_unlocked && (
         <Alert
           message="Ca học đang khóa quyền điểm danh của Giáo viên (quá 48h)"
           description="Giáo viên hiện không thể điểm danh ca này. Bạn có thể bấm nút 'Mở quyền điểm danh cho GV' ở góc trên nếu cần cho phép giáo viên cập nhật."
@@ -503,7 +555,7 @@ export function SessionDetailPage() {
       )}
 
       {/* Thông báo khi đã được mở khóa */}
-      {sessionData?.is_attendance_unlocked && (
+      {sessionData?.is_attendance_unlocked && !access?.cancelled && !access?.notStarted && (
         <Alert
           message="Quyền điểm danh đang được mở bởi Admin"
           description="Buổi học đã được Quản trị viên mở khóa. Giáo viên có thể tiến hành điểm danh và lưu dữ liệu bình thường."
@@ -527,12 +579,21 @@ export function SessionDetailPage() {
             <Descriptions.Item label="Lớp học">{sessionData.className}</Descriptions.Item>
 
             <Descriptions.Item label="Giảng viên">{sessionData.teacherName}</Descriptions.Item>
+            <Descriptions.Item label="Phòng học">{sessionData.roomName || 'Chưa phân công'}</Descriptions.Item>
+            <Descriptions.Item label="Trạng thái buổi học"><SessionStatusTag status={access?.cancelled ? 'cancelled' : sessionData.status} scheduleChange={sessionData.scheduleChange} /></Descriptions.Item>
           </Descriptions>
         </Card>
+
+        <SessionScheduleActions key={scope} scheduleId={sessionData.scheduleId} role={role}
+          scheduleChange={sessionData.scheduleChange} startTime={sessionData.startTime} endTime={sessionData.endTime}
+          disabled={editMode || saving || togglingUnlock || requestingUnlock || reminding}
+          onActiveChange={active => { if (scope === currentScope.current) setScheduleActionActive(active); }}
+          onChanged={async () => { if (scope === currentScope.current) await fetchSessionAttendance(); }} />
 
         <Card title="Nội dung buổi học">
           {canEditAttendance && editMode ? (
             <Input.TextArea
+              disabled={saving}
               value={lessonContent}
               onChange={(e) => setLessonContent(e.target.value)}
               placeholder="Nhập nội dung buổi học..."
@@ -550,14 +611,16 @@ export function SessionDetailPage() {
         {canEditAttendance && editMode && (
           <Alert
             message="Đang trong chế độ điểm danh"
-            description="Bạn có thể nhập nội dung buổi học, chỉnh trạng thái và ghi chú cho từng học viên. Nhấn Lưu điểm danh để cập nhật dữ liệu."
+            description="Các lựa chọn đang là bản nháp. Chọn trạng thái từng học viên hoặc dùng nút Có mặt cho học viên chưa chọn, rồi bấm Lưu điểm danh."
             type="info"
             showIcon
           />
         )}
 
         {canViewFullAttendance && (
-          <Card title="Bảng điểm danh">
+          <Card title={editMode ? 'Bảng điểm danh — Bản nháp chưa lưu' : 'Bảng điểm danh'}
+            extra={canEditAttendance && editMode && summary.unmarked > 0
+              ? <Button disabled={saving} onClick={() => setAttendance(previous => previous.map(item => item.status ? item : { ...item, status: 'present' }))}>Có mặt cho học viên chưa chọn</Button> : undefined}>
             <Table
               dataSource={attendance}
               rowKey="student_id"
@@ -581,11 +644,12 @@ export function SessionDetailPage() {
                         <Tag color="error">{summary.absent} Vắng</Tag>
                         <Tag color="warning">{summary.late} Muộn</Tag>
                         <Tag color="blue">{summary.excused} Vắng có phép</Tag>
+                        <Tag>{summary.unmarked} Chưa điểm danh</Tag>
                       </Space>
                     </Table.Summary.Cell>
 
                     <Table.Summary.Cell index={3}>
-                      Tỉ lệ tham gia: {summary.rate}%
+                      Tỉ lệ có mặt trên số đã điểm danh: {summary.rate === null ? '—' : `${summary.rate}%`}
                     </Table.Summary.Cell>
                   </Table.Summary.Row>
                 </Table.Summary>
@@ -601,7 +665,7 @@ export function SessionDetailPage() {
               rowKey="student_id"
               columns={absenceColumns}
               pagination={false}
-              locale={{ emptyText: 'Không có học viên vắng hoặc muộn' }}
+              locale={{ emptyText: summary.unmarked > 0 ? `Còn ${summary.unmarked} học viên chưa điểm danh` : 'Không có học viên vắng, muộn hoặc vắng có phép' }}
             />
           </Card>
         )}

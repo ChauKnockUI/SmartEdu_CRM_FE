@@ -4,7 +4,8 @@ import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { financeService } from '../../services/api/finance.service';
-import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as statusOf, sumBillingMoney, billingDate, invoiceCollectionLink } from './billingStatus';
+import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as statusOf, sumBillingMoney, billingDate } from './billingStatus';
+import { InvoiceDetailDrawer } from './InvoiceDetailDrawer';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
@@ -13,6 +14,7 @@ export function DebtsPage() {
   const { openDetail } = useDetailNavigation();
   const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [detailId, setDetailId] = useState<number | null>(null);
   const [debts, setDebts] = useState<any[]>([]);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
@@ -78,7 +80,7 @@ export function DebtsPage() {
       ),
     },
     {
-      title: 'Lớp / Invoice',
+      title: 'Lớp / Khoản phải thu',
       width: 240,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -103,7 +105,7 @@ export function DebtsPage() {
     },
     { title: 'Còn nợ', dataIndex: 'debt_amount', align: 'right', width: 150, render: (value) => <Typography.Text strong>{money(value)}</Typography.Text>, sorter: (a, b) => Number(a.debt_amount || 0) - Number(b.debt_amount || 0) },
     { title: 'Hạn thu', dataIndex: 'due_date', width: 130, render: billingDate },
-    { title: 'Thao tác', width: 180, render: (_, record) => <Button type="link" onClick={() => openDetail(invoiceCollectionLink(record.invoice_id))}>Xem khoản phải thu</Button> },
+    { title: 'Thao tác', width: 180, render: (_, record) => <Button type="link" onClick={() => setDetailId(record.invoice_id)}>Xem khoản phải thu</Button> },
   ];
 
   return (
@@ -136,7 +138,7 @@ export function DebtsPage() {
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="Tìm học viên, SĐT, email, lớp, invoice"
+            placeholder="Tìm học viên, SĐT, email, lớp, mã khoản thu"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             style={{ width: 360 }}
@@ -164,6 +166,7 @@ export function DebtsPage() {
           pagination={{ pageSize: 12, showTotal: (total) => `${total} khoản công nợ` }}
         />
       </Card>
+      <InvoiceDetailDrawer invoiceId={detailId} onClose={() => setDetailId(null)} onChanged={loadDebts} />
     </div>
   );
 }

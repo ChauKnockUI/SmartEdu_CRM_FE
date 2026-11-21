@@ -9,8 +9,11 @@ import { LEAD_ACTIONS, LEAD_MESSAGES } from '../leadStatus';
 import { useAuth } from '@/shared/contexts/AuthContext';
 import { getStudentPermissions } from '../../lms/studentPermissions';
 
-export function enrollmentClassOptions(classes: any[], courseId: number) {
-  return classes.filter(item => item.course_id === courseId && ['upcoming', 'ongoing'].includes(item.status)).map(item => {
+type Enrollment = { class_id: number; status: string };
+
+export function enrollmentClassOptions(classes: any[], courseId: number, enrollments: Enrollment[] = []) {
+  return classes.filter(item => item.course_id === courseId && ['upcoming', 'ongoing'].includes(item.status)
+    && !enrollments.some(enrollment => enrollment.class_id === item.id && enrollment.status !== 'dropped')).map(item => {
     const count = item._count?.classEnrollments || 0;
     return { value: item.id, label: `${item.name} · ${item.status === 'upcoming' ? 'Sắp mở' : 'Đang học'} · ${count}${item.max_students ? `/${item.max_students}` : ''} học viên`,
       disabled: !!item.max_students && count >= item.max_students };
@@ -29,8 +32,8 @@ export function enrollmentSchedule(record: any) {
 }
 
 // The same class choice is used when converting a Lead and assigning their class later.
-export function LeadEnrollmentModal({ open, lead, studentId, onCancel, onSuccess }: {
-  open: boolean; lead: any; studentId?: number; onCancel: () => void; onSuccess: (studentId: number) => void;
+export function LeadEnrollmentModal({ open, lead, studentId, enrollments = [], onCancel, onSuccess }: {
+  open: boolean; lead: any; studentId?: number; enrollments?: Enrollment[]; onCancel: () => void; onSuccess: (studentId: number) => void;
 }) {
   const { user } = useAuth();
   const { assignClass } = getStudentPermissions(user?.role);
@@ -46,6 +49,7 @@ export function LeadEnrollmentModal({ open, lead, studentId, onCancel, onSuccess
   const [revision, setRevision] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const returning = !!studentId && enrollments.some(item => item.class_id === classId && item.status === 'dropped');
 
   useEffect(() => {
     if (!open) return;
@@ -74,15 +78,16 @@ export function LeadEnrollmentModal({ open, lead, studentId, onCancel, onSuccess
   useEffect(() => {
     let current = true;
     setFee(undefined); setFeeError(''); setFeeLoading(false);
-    if (!open || !assignClass || mode !== 'now' || !classId) return;
+    if (!open || !assignClass || mode !== 'now' || !classId || returning) return;
     setFeeLoading(true);
     financeService.getClassFeeTemplate(classId).then(res => { if (current) setFee(res.data.total_amount); })
       .catch(err => { if (current) setFeeError(err.message || 'Không tải được học phí của lớp'); })
       .finally(() => { if (current) setFeeLoading(false); });
     return () => { current = false; };
-  }, [open, mode, classId, revision, assignClass]);
+  }, [open, mode, classId, revision, assignClass, returning]);
 
-  const options = enrollmentClassOptions(classes, lead?.course_id);
+  const options = enrollmentClassOptions(classes, lead?.course_id, studentId ? enrollments : []);
+  const feeBlocked = !returning && (feeLoading || fee === undefined || !!feeError);
   const selectedClass = classes.find(item => item.id === classId);
   const handleSubmit = async () => {
     if (submittingRef.current) return;
@@ -95,7 +100,7 @@ export function LeadEnrollmentModal({ open, lead, studentId, onCancel, onSuccess
     if (assignClass && mode === 'now' && (!classId || !options.some(item => item.value === classId && !item.disabled))) {
       setError('Vui lòng chọn lớp còn chỗ thuộc khóa quan tâm.'); return;
     }
-    if (assignClass && mode === 'now' && (loading || feeLoading || fee === undefined || loadError || feeError)) return;
+    if (assignClass && mode === 'now' && (loading || loadError || feeBlocked)) return;
     submittingRef.current = true; setSubmitting(true); setError('');
     try {
       let id = studentId;
@@ -116,7 +121,7 @@ export function LeadEnrollmentModal({ open, lead, studentId, onCancel, onSuccess
     onCancel={() => { if (!submittingRef.current) onCancel(); }} cancelText="Hủy"
     okText={studentId ? 'Xếp lớp' : LEAD_ACTIONS.convert} onOk={handleSubmit} confirmLoading={submitting}
     cancelButtonProps={{ disabled: submitting }} closable={!submitting} maskClosable={!submitting}
-    okButtonProps={{ disabled: (!!studentId && !assignClass) || (assignClass && mode === 'now' && (loading || feeLoading || fee === undefined || !!loadError || !!feeError || !classId)) }}>
+    okButtonProps={{ disabled: (!!studentId && !assignClass) || (assignClass && mode === 'now' && (loading || feeBlocked || !!loadError || !classId)) }}>
     <Space direction="vertical" size={16} className="w-full">
       <Descriptions size="small" column={1} items={[
         { key: 'name', label: 'Họ tên', children: lead?.full_name },
@@ -128,15 +133,16 @@ export function LeadEnrollmentModal({ open, lead, studentId, onCancel, onSuccess
       {assignClass && mode === 'now' ? <>
         <Select aria-label="Lớp học" className="w-full" placeholder="Chọn lớp thuộc khóa quan tâm" showSearch optionFilterProp="label"
           value={classId} options={options} loading={loading} disabled={submitting || loading}
-          onChange={value => { setClassId(value); setError(''); }}
-          notFoundContent={loading ? 'Đang tải…' : 'Chưa có lớp sắp mở hoặc đang học cho khóa này'} />
+          onChange={value => { setClassId(value); setFee(undefined); setFeeError(''); setError(''); }}
+          notFoundContent={loading ? 'Đang tải…' : 'Chưa có lớp sắp mở hoặc đang học phù hợp để ghi danh'} />
         {selectedClass && <div className="text-sm text-gray-600">
           <div>Khai giảng: {selectedClass.start_date ? dayjs(selectedClass.start_date).format('DD/MM/YYYY') : 'Chưa có ngày khai giảng'}</div>
           <div>Lịch học: {enrollmentSchedule(selectedClass)}</div>
-          <div>Tổng phí theo bảng phí lớp: {feeLoading ? 'Đang tải…' : fee === undefined ? 'Chưa tải được' : `${Number(fee).toLocaleString('vi-VN')} đ`}</div>
-          {studentId && <div>Khoản học phí đã tạo từ Lead cho cùng khóa sẽ được giữ nguyên và liên kết với lớp.</div>}
+          {returning ? <div>Ghi danh lại: giữ nguyên học phí cũ, không tạo khoản thu mới.</div>
+            : <div>Tổng phí theo bảng phí lớp: {feeLoading ? 'Đang tải…' : fee === undefined ? 'Chưa tải được' : `${Number(fee).toLocaleString('vi-VN')} đ`}</div>}
+          {studentId && <div>Ghi danh lại lớp đã nghỉ sẽ giữ nguyên học phí cũ, không tự tạo khoản thu mới. Khi xếp lớp mới, khoản học phí từ Lead cho cùng khóa sẽ được giữ nguyên và liên kết với lớp.</div>}
         </div>}
-        {(loadError || feeError) && <Alert type="error" showIcon message={loadError || feeError}
+        {(loadError || (!returning && feeError)) && <Alert type="error" showIcon message={loadError || feeError}
           action={<Button size="small" disabled={submitting} onClick={() => setRevision(value => value + 1)}>Thử lại</Button>} />}
       </> : <Alert type="info" showIcon message={assignClass
         ? 'Tạo hồ sơ học viên, chưa xếp lớp và chưa tạo khoản phải thu. Bạn có thể xếp lớp từ hồ sơ học viên sau.'
