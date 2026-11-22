@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
@@ -13,9 +14,7 @@ import {
   Modal,
   Popconfirm,
   Progress,
-  Tooltip,
   Empty,
-  Badge,
 } from 'antd';
 import {
   PlusOutlined,
@@ -25,15 +24,13 @@ import {
   BookOutlined,
   TeamOutlined,
   UserOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { classService } from '@/services/api/class.service';
 import { studentService } from '@/services/api/student.service';
 import { getApiConfig } from '@/services/api/apiConfig';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import dayjs from 'dayjs';
 
 const config = getApiConfig();
@@ -51,6 +48,8 @@ type Student = any;
 export function SchedulingPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedClass = Number(searchParams.get('class_id'));
 
   // State danh sách
   const [classes, setClasses] = useState<Class[]>([]);
@@ -90,7 +89,11 @@ export function SchedulingPage() {
   const fetchClasses = async () => {
     try {
       const res = await classService.getAll({ limit: 100 });
-      setClasses(res.data || []);
+      const rows = res.data || [];
+      setClasses(previous => {
+        const selected = previous.find(item => item.id === selectedClassId.current);
+        return selected && !rows.some((item: Class) => item.id === selected.id) ? [...rows, selected] : rows;
+      });
     } catch {
       message.error('Lỗi tải danh sách lớp học');
     }
@@ -237,8 +240,8 @@ export function SchedulingPage() {
   };
 
   // ================= SELECT CLASS =================
-  const handleClassChange = (classId: number) => {
-    const cls = classes.find((c) => c.id === classId);
+  const handleClassChange = (classId: number, requested?: Class) => {
+    const cls = requested || classes.find((c) => c.id === classId);
     selectedClassId.current = cls?.id;
     detailsRequest.current++;
     setSelectedClassDetails(null); setDetailsError('');
@@ -262,6 +265,19 @@ export function SchedulingPage() {
       });
     }
   };
+
+  useEffect(() => {
+    if (!Number.isInteger(requestedClass) || requestedClass <= 0 || requestedClass > 2147483647) return;
+    let current = true;
+    handleClassChange(0);
+    classService.getById(requestedClass).then(result => {
+      if (!current) return;
+      const cls = result.data;
+      setClasses(previous => previous.some(item => item.id === cls.id) ? previous : [...previous, cls]);
+      setOnlyUnassigned(false); handleClassChange(cls.id, cls);
+    }).catch(err => { if (current) message.error(err.message || 'Không mở được lớp cần phân công.'); });
+    return () => { current = false; };
+  }, [requestedClass]);
 
   // ================= ASSIGN TEACHER & ROOM =================
   const handleAssign = async () => {
@@ -421,7 +437,7 @@ export function SchedulingPage() {
   }, [enrollModalOpen, selectedClass?.id, candidateIds, conflictRevision, detailsLoading, detailsError]);
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Xếp lớp & Phân bổ tài nguyên"
         breadcrumbs={[
@@ -497,7 +513,7 @@ export function SchedulingPage() {
                     ? 'Không có lớp nào chưa có giảng viên'
                     : 'Chọn lớp học cần phân công'
                 }
-                onChange={handleClassChange}
+                onChange={id => handleClassChange(id)}
                 disabled={assignSaving || enrollLoading || unenrollLoadingId !== null}
                 showSearch
                 optionFilterProp="label"
@@ -637,7 +653,7 @@ export function SchedulingPage() {
                   dataSource={rooms}
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 5 }}
+                  pagination={paginationProps('phòng', { defaultPageSize: 5, pageSizeOptions: [5, 10, 20, 50] })}
                   columns={[
                     { title: 'Tên phòng', dataIndex: 'name' },
                     { title: 'Sức chứa', dataIndex: 'capacity' },
@@ -666,7 +682,7 @@ export function SchedulingPage() {
                   dataSource={teachers}
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 5 }}
+                  pagination={paginationProps('giảng viên', { defaultPageSize: 5, pageSizeOptions: [5, 10, 20, 50] })}
                   columns={[
                     { title: 'Họ và tên', dataIndex: 'full_name' },
                     {
@@ -775,7 +791,7 @@ export function SchedulingPage() {
               loading={detailsLoading}
               dataSource={enrolledList}
               rowKey={(record) => record.id || record.student_id}
-              pagination={{ pageSize: 10, showTotal: (total) => `Tổng ${total} học viên (gồm lịch sử)` }}
+              pagination={paginationProps('học viên (gồm lịch sử)', { defaultPageSize: 10 })}
               locale={{
                 emptyText: (
                   <div className="py-8 text-center text-gray-400">

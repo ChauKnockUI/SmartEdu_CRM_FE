@@ -35,50 +35,15 @@ import { useAuth } from '../../shared/contexts/AuthContext';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { studentService } from '@/services/api/student.service';
 import { financeService } from '@/services/api/finance.service';
-import dayjs from 'dayjs';
 import { LeadEnrollmentModal } from '../crm/components/LeadEnrollmentModal';
 import { getStudentPermissions } from './studentPermissions';
 import { BillingStatusTag, billingDate } from '../finance/billingStatus';
 import { InvoiceDetailDrawer } from '../finance/InvoiceDetailDrawer';
 import { studentStatusColors as STATUS_COLORS, studentStatusLabels as STATUS_LABELS } from './studentFilters';
 import { getClassStatus } from './classFilters';
+import { StudentScheduleTab } from './StudentScheduleTab';
 
 type Student = any;
-
-const DAY_MAP: Record<string, string> = {
-  Sun: 'CN',
-  Mon: 'Thứ 2',
-  Tue: 'Thứ 3',
-  Wed: 'Thứ 4',
-  Thu: 'Thứ 5',
-  Fri: 'Thứ 6',
-  Sat: 'Thứ 7',
-};
-
-const parseScheduleList = (value?: string | Array<string | number>): string[] => {
-  if (Array.isArray(value)) return value.map(String);
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) return parsed.map(String);
-  } catch { /* Older records may store comma-separated values. */ }
-  return value.split(',').map(item => item.trim());
-};
-
-const formatSchedule = (days?: string | number[], time?: string | string[]) => {
-  const labels = ['CN', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
-  const formattedDays = parseScheduleList(days)
-    .filter(Boolean)
-    .map(day => DAY_MAP[day] || labels[Number(day)])
-    .filter(Boolean)
-    .sort((a, b) => (labels.indexOf(a) || 7) - (labels.indexOf(b) || 7))
-    .join(' • ');
-  const formattedTime = parseScheduleList(time)
-    .map(value => value.match(/(?:^|T)(\d{2}:\d{2})/)?.[1])
-    .filter(Boolean)
-    .join(' – ');
-  return [formattedDays, formattedTime].filter(Boolean).join(' · ') || 'Chưa có lịch';
-};
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
 
@@ -125,6 +90,7 @@ export function StudentDetailPage() {
   const [invoiceError, setInvoiceError] = useState('');
   const [invoiceDetailId, setInvoiceDetailId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scheduleRevision, setScheduleRevision] = useState(0);
   const [riskLoading, setRiskLoading] = useState(false);
 
   const [editOpen, setEditOpen] = useState(false);
@@ -203,6 +169,7 @@ export function StudentDetailPage() {
   };
 
   const refreshAll = () => {
+    setScheduleRevision(value => value + 1);
     fetchStudent();
     if (student?.id) { if (viewFinance) fetchInvoices(student.id); if (canReview) fetchRisks(student.id); }
   };
@@ -350,35 +317,6 @@ export function StudentDetailPage() {
     }] : []),
   ];
 
-  const scheduleColumns = [
-    {
-      title: 'Lớp học',
-      render: (_: any, record: any) => record.class?.name,
-    },
-    {
-      title: 'Lịch',
-      render: (_: any, record: any) =>
-        formatSchedule(
-          record.class?.schedule_days,
-          record.class?.schedule_time
-        ),
-    },
-    {
-      title: 'Thời gian khóa',
-      render: (_: any, record: any) => (
-        <>
-          {record.class?.start_date
-            ? dayjs(record.class.start_date).format('DD/MM/YYYY')
-            : '-'}
-          {' → '}
-          {record.class?.end_date
-            ? dayjs(record.class.end_date).format('DD/MM/YYYY')
-            : '-'}
-        </>
-      ),
-    },
-  ];
-
   const invoiceColumns = [
     { title: 'Mã khoản thu', dataIndex: 'invoice_no' },
     { title: 'Phải thu sau giảm giá', dataIndex: 'payable_amount', render: money },
@@ -398,7 +336,7 @@ export function StudentDetailPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
@@ -553,14 +491,8 @@ export function StudentDetailPage() {
             key: 'schedule',
             label: 'Lịch học',
             children: (
-              <Card title="Lịch học hiện tại">
-                <Table
-                  rowKey="class_id"
-                  dataSource={activeClasses}
-                  columns={scheduleColumns}
-                  pagination={false}
-                />
-              </Card>
+              <StudentScheduleTab key={`${scope}:${student.id}`} studentId={student.id} enrollments={enrolledClasses}
+                enabled={activeTab === 'schedule'} revision={scheduleRevision} />
             ),
           },
           {

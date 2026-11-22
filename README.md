@@ -152,6 +152,48 @@ Nhắc điểm danh tính theo giờ Việt Nam giống BE, ẩn nút khi buổi
 Thông báo nghỉ/học bù xuất hiện trong chuông của người liên quan và mở đúng buổi;
 thông báo không còn hiệu lực được đánh dấu đã đọc, hiển thị lý do và bỏ liên kết.
 
+## Giao diện dùng chung
+
+Tham chiếu bố cục trang quản trị Ant Design Pro (Table List/Analysis): nền trung
+tính, khối dữ liệu phẳng, bo góc nhỏ, ưu tiên bảng/bộ lọc/thao tác. Màu xanh dùng
+cho thao tác và điều hướng; màu trạng thái dùng cho cảnh báo nghiệp vụ. Không dùng
+viền nhiều màu hoặc nền icon trang trí cho thẻ số liệu.
+
+Theme Ant Design nằm trong `src/app/App.tsx`; bố cục và khoảng cách chung ở
+`src/styles/crm.css`. `StyleProvider layer` cùng thứ tự CSS layer
+`theme, base, antd, components, utilities` giúp các lớp Tailwind như margin,
+padding, ẩn/hiện hoạt động đúng với component Ant Design.
+
+Các trang dùng `crm-page` để thống nhất khoảng cách; `PageHeader` dùng chung
+tiêu đề, breadcrumb và thao tác. Bộ lọc dùng `crm-filter-controls` để tự xuống
+dòng trên màn hình nhỏ. `Disclosure` gom phần giải thích phụ, giữ dữ liệu và
+thao tác chính dễ thấy. Thanh tiến độ lớp giữ cách tính hiện tại, hiển thị % và
+số buổi còn lại; sidebar chuyển thành menu đóng/mở trên điện thoại.
+
+`InfoHint` đưa cách tính KPI/thống kê vào nút ⓘ có thể mở bằng chuột, bàn phím
+hoặc chạm. Các khối phân tích/cảnh báo cùng hàng trên dashboard Admin căn đều
+chiều cao. Bộ lọc Lead, lớp, học viên và thu phí dùng chung ba cỡ: ô tìm kiếm
+280px, danh sách chọn 220px, trạng thái 180px; trên điện thoại chuyển hết chiều rộng.
+
+Các bảng và danh sách có phân trang dùng `paginationProps` trong
+`src/shared/utils/pagination.ts`: cùng kích thước, nhãn “Tổng 53 phòng” nằm cạnh
+cụm nút chuyển trang, giữ kiểu viền của Ant Design. Danh sách lớp dùng thẻ gọn,
+đặt bộ lọc và phân trang trong cùng khung dữ liệu. Trang tải từ BE giữ
+`current/pageSize/onChange`; bảng đã tải đủ
+dữ liệu dùng `defaultPageSize` để đổi số dòng tại FE. Không bật đổi số dòng cho
+các mục có kích thước trang cố định. Kiểu hiển thị chung ở `.crm-pagination`.
+
+Bố cục theo công việc: Lead/học viên/thu phí dùng bảng để đối chiếu; lớp học dùng
+thẻ để nhận biết lớp, lịch và sĩ số; thời khóa biểu dùng lịch; dashboard dùng chỉ
+số, biểu đồ và cảnh báo. Giữ cùng màu, phông chữ và khoảng cách giữa các cách trình
+bày; không thêm trang trí chỉ để làm các màn hình khác nhau.
+
+Dashboard các vai trò giữ cùng thứ tự: bốn chỉ số, nội dung chính, cột cảnh báo.
+Sale theo dõi Lead và hoạt động; giáo viên xem lịch dạy/học viên cần hỗ trợ; học
+viên xem lịch/tiến độ và học phí. Chi tiết điểm danh nằm trong nút ⓘ của tỷ lệ
+tham gia. Lịch dạy gom buổi hôm nay và sắp tới theo ID để tránh lặp; phân trang
+danh sách dùng dữ liệu đã tải. Cảnh báo vẫn tải độc lập khi tổng quan gặp lỗi.
+
 ## 📄 License
 
 MIT License

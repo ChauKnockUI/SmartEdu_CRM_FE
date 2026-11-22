@@ -51,7 +51,7 @@ export function AIInsightsPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Demo Insights"
         breadcrumbs={[

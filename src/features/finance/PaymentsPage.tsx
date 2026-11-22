@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Badge,
@@ -269,7 +270,7 @@ export function PaymentsPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Thu học phí"
         breadcrumbs={[
@@ -284,7 +285,7 @@ export function PaymentsPage() {
       {invoiceId && <Alert className="mb-4" type={!loading && !loadError && !invoices.length ? 'warning' : 'info'} showIcon
         message={!loading && !loadError && !invoices.length ? 'Không tìm thấy khoản phải thu trong phạm vi được xem.' : `Khoản phải thu đang xem: ${invoices[0]?.invoice_no || 'Đang tải…'}`}
         action={<Button size="small" onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.delete('invoice_id'); return next; })}>Xem tất cả</Button>} />}
-      {!loadError && <Row gutter={16} className="mb-4">
+      {!loadError && <Row gutter={[16, 16]} className="mb-4">
         <Col xs={24} sm={12} lg={6}>
           <Card><Statistic title="Cần thu" value={summary.totalDebt} formatter={(value) => money(Number(value))} /></Card>
         </Col>
@@ -300,19 +301,20 @@ export function PaymentsPage() {
       </Row>}
 
       <Card>
-        <Space className="mb-4 w-full" size={12} wrap>
+        <Space className="crm-filter-controls mb-4 w-full" size={12} wrap>
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="Tìm học viên, SĐT, email, lớp, mã khoản thu"
+            aria-label="Tìm theo học viên, số điện thoại, email, lớp hoặc mã khoản thu"
+            placeholder="Học viên, SĐT, email, lớp, mã thu"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            style={{ width: 360 }}
+            className="crm-filter-search"
           />
           <Select
             value={statusFilter}
             onChange={setStatusFilter}
-            style={{ width: 220 }}
+            className="crm-filter-select"
             options={[
               { label: 'Cần xử lý', value: 'collecting' },
               { label: 'Quá hạn', value: 'overdue' },
@@ -340,7 +342,7 @@ export function PaymentsPage() {
                   locale={{ emptyText: loadError ? 'Chưa tải được khoản phải thu' : 'Không có khoản phải thu phù hợp' }}
                   rowKey="id"
                   scroll={{ x: 1280 }}
-                  pagination={{ pageSize: 12, showTotal: (total) => `${total} khoản cần xem` }}
+                  pagination={paginationProps('khoản thu', { defaultPageSize: 10 })}
                 />
               ),
             },
@@ -353,7 +355,7 @@ export function PaymentsPage() {
                   columns={transactionColumns}
                   dataSource={transactions}
                   rowKey="id"
-                  pagination={{ pageSize: 12 }}
+                  pagination={paginationProps('giao dịch', { defaultPageSize: 10 })}
                 />
               ),
             },

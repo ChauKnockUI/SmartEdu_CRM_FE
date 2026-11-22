@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import React from 'react';
 import { Table, Tag, Button, Space, Avatar } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
@@ -97,7 +98,7 @@ export function UsersPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Quản lý Người dùng"
         breadcrumbs={[
@@ -117,10 +118,7 @@ export function UsersPage() {
           columns={columns}
           dataSource={mockUsers}
           rowKey="id"
-          pagination={{
-            pageSize: 10,
-            showTotal: (total) => `Tổng ${total} người dùng`,
-          }}
+          pagination={paginationProps('người dùng', { defaultPageSize: 10 })}
         />
       </div>
     </div>

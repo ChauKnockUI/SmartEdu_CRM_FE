@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useRef, useState } from 'react';
 import {
   Card,
@@ -407,7 +408,7 @@ export function ClassDetailPage() {
   };
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={classItem.name}
         actions={
@@ -508,7 +509,7 @@ export function ClassDetailPage() {
                 <Table
                   rowKey="id"
                   size="small"
-                  pagination={{ pageSize: 10 }}
+                  pagination={paginationProps('học viên', { defaultPageSize: 10 })}
                   dataSource={classItem.classEnrollments || []}
                   locale={{ emptyText: 'Chưa có học viên nào trong lớp' }}
                   loading={riskLoading || riskFetching}
@@ -556,7 +557,7 @@ export function ClassDetailPage() {
                   rowKey="id"
                   loading={schedulesLoading}
                   dataSource={schedules}
-                  pagination={{ pageSize: 10 }}
+                  pagination={paginationProps('buổi học', { defaultPageSize: 10 })}
                   locale={{ emptyText: schedulesError ? 'Chưa tải được lịch học' : schedulesLoading ? 'Đang tải lịch học…' : 'Chưa có buổi học nào' }}
                   columns={[
                     {
@@ -639,7 +640,7 @@ export function ClassDetailPage() {
                 <Table
                   rowKey="id"
                   dataSource={materials}
-                  pagination={{ pageSize: 10 }}
+                  pagination={paginationProps('tài liệu', { defaultPageSize: 10 })}
                   locale={{ emptyText: 'Chưa có tài liệu nào' }}
                   columns={[
                     {

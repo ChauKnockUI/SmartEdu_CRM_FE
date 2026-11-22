@@ -580,7 +580,7 @@ export function MySchedulePage() {
   }
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={isTeacher ? 'Lịch dạy của tôi' : 'Lịch học của tôi'}
         breadcrumbs={[

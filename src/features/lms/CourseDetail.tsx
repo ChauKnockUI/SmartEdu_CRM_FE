@@ -180,7 +180,7 @@ export function CourseDetailPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={course.name}
         actions={

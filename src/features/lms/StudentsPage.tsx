@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Table,
@@ -296,7 +297,7 @@ export function StudentsPage() {
   const listLoading = loading || loadedContext !== context;
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={user?.role === 'sale' ? 'Học viên phụ trách' : user?.role === 'teacher' ? 'Học viên trong lớp phụ trách' : 'Quản lý Học viên'}
         actions={<Space wrap>
@@ -313,21 +314,21 @@ export function StudentsPage() {
         </Space>}
       />
 
-      <div className="bg-white p-6 rounded-lg shadow-sm">
+      <div className="crm-surface">
         {/* FILTER */}
-        <Space wrap size={[12, 12]} className="mb-4">
+        <Space wrap size={[12, 12]} className="crm-filter-controls mb-4">
           <Input.Search aria-label="Tìm học viên" placeholder="Tên, email, số điện thoại" allowClear maxLength={200}
-            style={{ width: 270 }} value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
+            className="crm-filter-search" value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
             onSearch={value => updateView({ search: value.trim() })} />
           <Select aria-label="Lọc học viên theo lớp" placeholder="Lớp học" allowClear showSearch optionFilterProp="label"
-            style={{ width: 230 }} value={view.classId} options={classOptions} loading={optionsLoading}
+            className="crm-filter-select" value={view.classId} options={classOptions} loading={optionsLoading}
             onChange={classId => updateView({ classId })} />
 
           <Select
             placeholder="Trạng thái"
             aria-label="Lọc trạng thái học viên"
             allowClear
-            style={{ width: 180 }}
+            className="crm-filter-status"
             value={view.status}
             onChange={status => updateView({ status })}
             options={STUDENT_STATUSES.map(({ value, label }) => ({ value, label }))}
@@ -337,7 +338,7 @@ export function StudentsPage() {
             placeholder="Công nợ"
             aria-label="Lọc công nợ học viên"
             allowClear
-            style={{ width: 180 }}
+            className="crm-filter-status"
             value={view.hasDebt}
             onChange={hasDebt => updateView({ hasDebt })}
             options={[
@@ -367,15 +368,13 @@ export function StudentsPage() {
           loading={listLoading}
           scroll={{ x: viewFinance ? 1200 : 1050 }}
           locale={{ emptyText: loadError ? 'Không tải được dữ liệu học viên' : hasFilters ? 'Không có học viên phù hợp bộ lọc' : 'Chưa có học viên trong phạm vi được xem' }}
-          pagination={{
+          pagination={paginationProps('học viên', {
             current: view.page,
             pageSize: view.pageSize,
             total: visibleTotal,
-            showSizeChanger: true,
             pageSizeOptions: studentPageSizes,
             onChange: (page, pageSize) => updateView({ page: pageSize === view.pageSize ? page : 1, pageSize }, false),
-            showTotal: (t) => `Tổng ${t} học viên`,
-          }}
+          })}
         />
       </div>
 

@@ -85,7 +85,7 @@ export function AIModelsPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Quản lý AI Models"
         breadcrumbs={[

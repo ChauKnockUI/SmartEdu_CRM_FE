@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Table, Button, Space, Select, Input, message } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
@@ -115,8 +116,8 @@ export function AIPredictionsPage() {
       <div className="mb-3 text-xs text-gray-500">Mỗi dòng là một học viên trong một lớp đang học; học viên học nhiều lớp có thể xuất hiện nhiều lần.</div>
       <Table columns={columns} dataSource={data} rowKey={row => `${row.class_id}:${row.student_id}`} loading={loading} scroll={{ x: 960 }}
         locale={{ emptyText: loadError ? 'Chưa tải được cảnh báo' : 'Không có học viên phù hợp trong các lớp được theo dõi' }}
-        pagination={{ current: page, pageSize: view.pageSize, pageSizeOptions: dropoutPageSizes, showSizeChanger: true,
-          showTotal: total => `${total} trường hợp theo lớp`, onChange: (nextPage, pageSize) => updateView({ page: pageSize === view.pageSize ? nextPage : 1, pageSize }) }} />
+        pagination={paginationProps('trường hợp theo lớp', { current: page, pageSize: view.pageSize, pageSizeOptions: dropoutPageSizes,
+          onChange: (nextPage, pageSize) => updateView({ page: pageSize === view.pageSize ? nextPage : 1, pageSize }) })} />
     </div>
     <RiskDetailsDrawer open={!!selected} onClose={closeRisk} name={selected?.full_name} className={selected?.class_name}
       data={selected} loading={scoring} onEvaluate={selected ? () => evaluate(selected) : undefined}

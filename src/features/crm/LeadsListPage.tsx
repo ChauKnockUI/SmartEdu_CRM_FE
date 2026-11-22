@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -434,19 +435,19 @@ export function LeadsListPage() {
   ], [navigate, user?.role, pagination.current, sourceOptions]);
 
   const tableData = leads;
-  const listFilters = <div className="mb-4 flex flex-wrap items-center gap-3">
-    <Input.Search aria-label="Tìm lead" placeholder="Tên, số điện thoại, email" allowClear style={{ width: 230 }} value={searchDraft} onChange={event => setSearchDraft(event.target.value)} onSearch={search => handleFilterChange({ search: search.trim() || undefined })} />
-    <Select aria-label="Lọc giai đoạn" placeholder="Tất cả giai đoạn" allowClear style={{ width: 160 }} value={filters.status} options={LEAD_STATUSES.map(({ value, label }) => ({ value, label }))} onChange={status => handleFilterChange({ status })} />
-    <Select aria-label="Lọc nguồn lead" placeholder="Tất cả nguồn" allowClear style={{ width: 160 }} value={filters.source} options={sourceOptions} onChange={source => handleFilterChange({ source })} />
-    <Select aria-label="Lọc khóa học" placeholder="Tất cả khóa học" allowClear style={{ width: 175 }} value={filters.course_id} options={courseOptions} onChange={course_id => handleFilterChange({ course_id })} />
-    {user?.role === 'admin' && <Select aria-label="Lọc sale phụ trách" placeholder="Tất cả sale" allowClear style={{ width: 165 }} value={filters.assigned_to} options={[{ label: 'Chưa phân công', value: 'unassigned' }, ...sales.map(sale => ({ label: sale.full_name, value: sale.id }))]} onChange={assigned_to => handleFilterChange({ assigned_to })} />}
+  const listFilters = <div className="crm-filter-controls mb-4 items-center">
+    <Input.Search aria-label="Tìm lead" placeholder="Tên, số điện thoại, email" allowClear className="crm-filter-search" value={searchDraft} onChange={event => setSearchDraft(event.target.value)} onSearch={search => handleFilterChange({ search: search.trim() || undefined })} />
+    <Select aria-label="Lọc giai đoạn" placeholder="Tất cả giai đoạn" allowClear className="crm-filter-status" value={filters.status} options={LEAD_STATUSES.map(({ value, label }) => ({ value, label }))} onChange={status => handleFilterChange({ status })} />
+    <Select aria-label="Lọc nguồn lead" placeholder="Tất cả nguồn" allowClear className="crm-filter-status" value={filters.source} options={sourceOptions} onChange={source => handleFilterChange({ source })} />
+    <Select aria-label="Lọc khóa học" placeholder="Tất cả khóa học" allowClear className="crm-filter-select" value={filters.course_id} options={courseOptions} onChange={course_id => handleFilterChange({ course_id })} />
+    {user?.role === 'admin' && <Select aria-label="Lọc sale phụ trách" placeholder="Tất cả sale" allowClear className="crm-filter-select" value={filters.assigned_to} options={[{ label: 'Chưa phân công', value: 'unassigned' }, ...sales.map(sale => ({ label: sale.full_name, value: sale.id }))]} onChange={assigned_to => handleFilterChange({ assigned_to })} />}
     <Space size={6}><Switch size="small" aria-label="Chỉ lead cần chăm sóc" checked={Boolean(filters.needs_care)} onChange={needs_care => handleFilterChange({ needs_care })} /><Tooltip title="Lead chưa liên hệ hoặc đã quá 3 ngày chưa liên hệ lại; chỉ tính lead đang chăm sóc."><span className="text-xs text-gray-600">Cần chăm sóc (&gt;3 ngày)</span></Tooltip></Space>
     <RangePicker aria-label="Lọc ngày tạo" placeholder={['Tạo từ ngày', 'Đến ngày']} value={filters.dateRange} onChange={dateRange => handleFilterChange({ dateRange })} />
     {Object.values(filters).some(Boolean) && <Button type="link" size="small" onClick={() => { setSearchDraft(''); setSearchParams(writeLeadLocation({}, viewMode), { replace: true }); }}>Xóa bộ lọc</Button>}
   </div>;
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={user?.role === 'sale' ? 'Khách hàng của tôi' : 'Quản lý lead'}
         breadcrumbs={[
@@ -470,7 +471,7 @@ export function LeadsListPage() {
         <div className="text-xs text-gray-500">Tổng quan theo bộ lọc hiện tại · {overview?.summary?.totalLeads ?? '—'} lead</div>
       </div>
 
-      <div className="rounded-lg bg-white p-4 shadow-sm">
+      <div className="crm-surface">
         {listFilters}
         <Tabs
           activeKey={viewMode}
@@ -488,7 +489,8 @@ export function LeadsListPage() {
                   onConvert={handleConvert}
                   includeLost={filters.status === 'lost'}
                 />
-                <Pagination className="mt-4" current={pagination.current} pageSize={pagination.pageSize} total={pagination.total} showSizeChanger pageSizeOptions={pageSizeOptions} showTotal={total => `${total} lead · thẻ hiển thị theo trang`} onChange={(page, size) => fetchLeads(page, size)} />
+                <Pagination {...paginationProps('lead', { current: pagination.current, pageSize: pagination.pageSize, total: pagination.total,
+                  pageSizeOptions, onChange: (page, size) => fetchLeads(page, size) })} />
               </div>),
             },
             {
@@ -502,15 +504,13 @@ export function LeadsListPage() {
                     rowKey="id"
                     loading={loading}
                     scroll={{ x: 1100 }}
-                    pagination={{
+                    pagination={paginationProps('lead', {
                       current: pagination.current,
                       pageSize: pagination.pageSize,
                       total: pagination.total,
-                      showSizeChanger: true,
                       pageSizeOptions,
-                      showTotal: (total) => `Tổng ${total} lead`,
                       onChange: (page, pageSize) => fetchLeads(page, pageSize),
-                    }}
+                    })}
                   />
                 </div>
               ),

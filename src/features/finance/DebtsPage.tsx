@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Col, Input, Progress, Row, Select, Space, Statistic, Table, Typography } from 'antd';
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons';
@@ -109,7 +110,7 @@ export function DebtsPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Công nợ học viên"
         breadcrumbs={[
@@ -121,7 +122,7 @@ export function DebtsPage() {
       />
 
       {loadError && <Alert className="mb-4" type="error" showIcon message={loadError} />}
-      {!loadError && <Row gutter={16} className="mb-4">
+      {!loadError && <Row gutter={[16, 16]} className="mb-4">
         <Col xs={24} sm={12} lg={8}>
           <Card><Statistic title="Tổng công nợ" value={totalDebt} formatter={(value) => money(Number(value))} /></Card>
         </Col>
@@ -134,19 +135,20 @@ export function DebtsPage() {
       </Row>}
 
       <Card>
-        <Space className="mb-4 w-full" size={12} wrap>
+        <Space className="crm-filter-controls mb-4 w-full" size={12} wrap>
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="Tìm học viên, SĐT, email, lớp, mã khoản thu"
+            aria-label="Tìm theo học viên, số điện thoại, email, lớp hoặc mã khoản thu"
+            placeholder="Học viên, SĐT, email, lớp, mã thu"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            style={{ width: 360 }}
+            className="crm-filter-search"
           />
           <Select
             value={filter}
             onChange={setFilter}
-            style={{ width: 180 }}
+            className="crm-filter-status"
             options={[
               { label: 'Tất cả công nợ', value: 'all' },
               { label: 'Quá hạn', value: 'overdue' },
@@ -163,7 +165,7 @@ export function DebtsPage() {
           dataSource={rows}
           locale={{ emptyText: loadError ? 'Chưa tải được công nợ' : 'Không có công nợ phù hợp' }}
           scroll={{ x: 1100 }}
-          pagination={{ pageSize: 12, showTotal: (total) => `${total} khoản công nợ` }}
+          pagination={paginationProps('khoản công nợ', { defaultPageSize: 10 })}
         />
       </Card>
       <InvoiceDetailDrawer invoiceId={detailId} onClose={() => setDetailId(null)} onChanged={loadDebts} />

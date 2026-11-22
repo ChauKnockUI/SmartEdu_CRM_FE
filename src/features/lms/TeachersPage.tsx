@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useState } from 'react';
 import {
   Table, Tag, Button, Space, Modal, Badge, Card,
@@ -346,7 +347,7 @@ export function TeachersPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Quản lý Giảng viên"
         breadcrumbs={[
@@ -385,10 +386,7 @@ export function TeachersPage() {
           dataSource={teachers}
           rowKey="id"
           loading={loading}
-          pagination={{
-            pageSize: 10,
-            showTotal: (total) => `Tổng ${total} giảng viên`,
-          }}
+          pagination={paginationProps('giảng viên', { defaultPageSize: 10 })}
         />
       </Card>
 

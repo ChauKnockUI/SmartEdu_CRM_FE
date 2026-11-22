@@ -10,6 +10,7 @@ import {
 import { useNavigate } from 'react-router';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
+import { paginationProps } from '../../shared/utils/pagination';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { roomService } from '@/services/api/room.service';
 
@@ -39,7 +40,7 @@ export function RoomsPage() {
     const [minCapacity, setMinCapacity] = useState<number | undefined>();
 
     const [currentPage, setCurrentPage] = useState(1);
-    const pageSize = 10;
+    const [pageSize, setPageSize] = useState(10);
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingRoom, setEditingRoom] = useState<Room | null>(null);
@@ -73,7 +74,7 @@ export function RoomsPage() {
 
     useEffect(() => {
         fetchRooms();
-    }, [currentPage, searchText, statusFilter, minCapacity]);
+    }, [currentPage, pageSize, searchText, statusFilter, minCapacity]);
 
     // ================= ACTION =================
     const handleViewDetail = (id: number) => {
@@ -206,8 +207,8 @@ export function RoomsPage() {
 
     // ================= UI =================
     return (
-        <div>
-            <PageHeader
+        <div className="crm-page">
+      <PageHeader
                 title="Quản lý Phòng học"
                 actions={
                     canCreate && (
@@ -219,24 +220,31 @@ export function RoomsPage() {
             />
 
             <Card>
-                <div className="mb-4 flex gap-4">
+                <div className="crm-filter-controls mb-4">
                     <Input
-                        placeholder="Tìm kiếm..."
+                        className="crm-filter-search"
+                        aria-label="Tìm phòng học"
+                        placeholder="Tìm tên phòng học"
+                        allowClear
                         value={searchText}
-                        onChange={e => setSearchText(e.target.value)}
+                        onChange={e => { setSearchText(e.target.value); setCurrentPage(1); }}
                         prefix={<SearchOutlined />}
                     />
 
-                    <Select value={statusFilter} onChange={setStatusFilter}>
+                    <Select className="crm-filter-status" aria-label="Lọc trạng thái phòng"
+                        value={statusFilter} onChange={value => { setStatusFilter(value); setCurrentPage(1); }}>
                         <Select.Option value="all">Tất cả</Select.Option>
                         <Select.Option value="active">Hoạt động</Select.Option>
                         <Select.Option value="inactive">Tạm dừng</Select.Option>
                     </Select>
 
                     <InputNumber
-                        placeholder="Sức chứa"
+                        className="crm-filter-status"
+                        aria-label="Sức chứa tối thiểu"
+                        placeholder="Sức chứa tối thiểu"
+                        min={1} precision={0}
                         value={minCapacity}
-                        onChange={(v) => setMinCapacity(v || undefined)}
+                        onChange={(v) => { setMinCapacity(v || undefined); setCurrentPage(1); }}
                     />
                 </div>
 
@@ -245,12 +253,16 @@ export function RoomsPage() {
                     dataSource={rooms}
                     rowKey="id"
                     loading={loading}
-                    pagination={{
+                    scroll={{ x: 800 }}
+                    pagination={paginationProps('phòng', {
                         current: currentPage,
                         pageSize,
                         total,
-                        onChange: setCurrentPage,
-                    }}
+                        onChange: (page, size) => {
+                            setCurrentPage(size === pageSize ? page : 1);
+                            setPageSize(size);
+                        },
+                    })}
                 />
             </Card>
 

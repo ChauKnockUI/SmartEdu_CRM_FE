@@ -51,7 +51,7 @@ export function RoomDetailPage() {
     : [];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={room.name}
 

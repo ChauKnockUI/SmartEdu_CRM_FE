@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
@@ -13,19 +14,15 @@ import {
   TimePicker,
   Select,
   InputNumber,
+  Alert,
   Empty,
   Spin,
-  Alert,
   Pagination,
   Space,
   Typography,
 } from 'antd';
 import {
   PlusOutlined,
-  TeamOutlined,
-  CalendarOutlined,
-  UserOutlined,
-  BookOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -257,7 +254,7 @@ export function ClassesPage() {
   });
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={pageTitle}
         actions={<Space wrap>
@@ -277,120 +274,69 @@ export function ClassesPage() {
         </Space>}
       />
 
-      <Card className="mb-4" size="small">
-        <Space wrap size={[12, 12]}>
+      <Card>
+        <Space wrap size={[12, 12]} className="crm-filter-controls mb-4">
           <Input.Search aria-label="Tìm theo tên lớp" placeholder="Tìm theo tên lớp" allowClear maxLength={200}
-            value={searchDraft} style={{ width: 260 }} onChange={event => setSearchDraft(event.target.value)}
+            value={searchDraft} className="crm-filter-search" onChange={event => setSearchDraft(event.target.value)}
             onSearch={value => updateView({ search: value.trim() })} />
           <Select aria-label="Lọc theo khóa học" placeholder="Khóa học" allowClear showSearch optionFilterProp="label"
-            style={{ width: 220 }} value={view.courseId} options={courseOptions} loading={optionsLoading}
+            className="crm-filter-select" value={view.courseId} options={courseOptions} loading={optionsLoading}
             onChange={courseId => updateView({ courseId })} />
-          <Select aria-label="Lọc theo trạng thái lớp" placeholder="Trạng thái lớp" allowClear style={{ width: 180 }}
+          <Select aria-label="Lọc theo trạng thái lớp" placeholder="Trạng thái lớp" allowClear className="crm-filter-status"
             value={view.status} options={CLASS_STATUSES.map(({ value, label }) => ({ value, label }))}
             onChange={status => updateView({ status })} />
           <Select aria-label="Lọc theo giáo viên" placeholder="Giáo viên phụ trách" allowClear showSearch optionFilterProp="label"
-            style={{ width: 250 }} value={view.unassignedTeacher ? 'unassigned' : view.teacherId}
+            className="crm-filter-select" value={view.unassignedTeacher ? 'unassigned' : view.teacherId}
             options={teacherOptions} loading={optionsLoading}
             onChange={value => updateView({ teacherId: typeof value === 'number' ? value : undefined, unassignedTeacher: value === 'unassigned' })} />
           {hasFilters && <Button type="link" onClick={() => {
             setSearchDraft(''); setSearchParams(writeClassLocation({ ...readClassLocation(new URLSearchParams()), pageSize: view.pageSize }));
           }}>Xóa bộ lọc</Button>}
         </Space>
-        {!loadError && <div className="mt-3 text-sm text-gray-500">{loading ? 'Đang tải lớp học...' : `Tổng ${total} lớp${hasFilters ? ' phù hợp bộ lọc' : ''}`}</div>}
+
+        {optionsError && <Alert className="mb-4" type="warning" showIcon message={optionsError}
+          action={<Button onClick={fetchOptions}>Thử lại bộ lọc</Button>} />}
+        {loadError && <Alert className="mb-4" type="error" showIcon message={loadError}
+          action={<Button onClick={fetchClasses}>Thử lại</Button>} />}
+
+        {!loadError && <>
+          <Spin spinning={loading}>
+            {classes.length ? <Row className="crm-class-grid" gutter={[16, 16]}>
+              {classes.map(cls => {
+                const status = getClassStatus(cls.status);
+                return <Col xs={24} md={12} xl={8} key={cls.id}>
+                  <article className="crm-class-card" aria-label={`Lớp ${cls.name}`}>
+                    <div className="crm-class-heading">
+                      <div className="min-w-0">
+                        <Button type="link" className="crm-class-title"
+                          onClick={() => openDetail(`/lms/classes/${cls.id}`)}>{cls.name}</Button>
+                        <div className="crm-class-secondary">{cls.course?.name || 'Chưa gắn khóa học'}</div>
+                      </div>
+                      <Tag color={status.color}>{status.label}</Tag>
+                    </div>
+                    <div>
+                      <div className="font-medium">{renderDays(cls)} · {renderTime(cls) || 'Chưa có giờ'}</div>
+                      <div className="crm-class-secondary">{formatDate(cls.start_date)} – {formatDate(cls.end_date)}</div>
+                    </div>
+                    <div className="text-sm"><span className="text-gray-500">Giáo viên: </span>
+                      {cls.teacher?.full_name || cls.teacher?.name || cls.teacherName || 'Chưa phân công'}</div>
+                    <div className="crm-class-footer">
+                      <span className="text-sm">Sĩ số <strong>{cls._count?.classEnrollments ?? 0}{cls.max_students > 0 ? `/${cls.max_students}` : ''}</strong></span>
+                      <Button type="link" size="small" onClick={() => openDetail(`/lms/classes/${cls.id}`)}>Chi tiết</Button>
+                    </div>
+                  </article>
+                </Col>;
+              })}
+            </Row> : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={loading ? 'Đang tải lớp học...' : hasFilters ? 'Không có lớp phù hợp bộ lọc đã chọn'
+              : isTeacher ? 'Bạn chưa được gán lớp dạy nào' : isStudent ? 'Bạn chưa được ghi danh vào lớp nào'
+                : 'Chưa có lớp học trong phạm vi phụ trách'} />}
+          </Spin>
+          <Pagination {...paginationProps('lớp', {
+            current: view.page, pageSize: view.pageSize, total, pageSizeOptions: classPageSizes, disabled: loading,
+            onChange: (page, pageSize) => updateView({ page: pageSize === view.pageSize ? page : 1, pageSize }, false),
+          })} />
+        </>}
       </Card>
-
-      {optionsError && <Alert className="mb-4" type="warning" showIcon message={optionsError}
-        action={<Button onClick={fetchOptions}>Thử lại bộ lọc</Button>} />}
-
-      {loadError ? <Alert type="error" showIcon message={loadError} action={<Button onClick={fetchClasses}>Thử lại</Button>} /> : loading ? (
-        <div className="flex justify-center py-16">
-          <Spin size="large" />
-        </div>
-      ) : classes.length === 0 ? (
-        <Card>
-          <Empty
-            description={
-              hasFilters ? 'Không có lớp phù hợp bộ lọc đã chọn' : isTeacher
-                ? 'Bạn chưa được gán lớp dạy nào'
-                : isStudent
-                  ? 'Bạn chưa được ghi danh vào lớp nào'
-                  : 'Chưa có lớp học trong phạm vi phụ trách'
-            }
-          />
-        </Card>
-      ) : (
-        <Row gutter={[16, 16]}>
-          {classes.map((cls) => (
-            <Col xs={24} md={12} lg={8} key={cls.id}>
-              <Card
-                hoverable
-                loading={loading}
-                onClick={() => openDetail(`/lms/classes/${cls.id}`)}
-                title={
-                  <div className="flex justify-between gap-2">
-                    <span className="min-w-0 break-words font-semibold">{cls.name}</span>
-                    <Tag className="shrink-0 self-start" color={getClassStatus(cls.status).color}>
-                      {getClassStatus(cls.status).label}
-                    </Tag>
-                  </div>
-                }
-              >
-                <div className="space-y-3">
-                  <div className="flex items-center text-gray-600">
-                    <BookOutlined className="mr-2" />
-                    {cls.course?.name || 'Chưa gắn khóa học'}
-                  </div>
-                  <div className="flex items-center text-gray-600">
-                    <UserOutlined className="mr-2" />
-                    {cls.teacher?.full_name ||
-                      cls.teacher?.name ||
-                      cls.teacherName ||
-                      'Chưa phân công giáo viên'}
-                  </div>
-
-                  <div className="flex items-center text-gray-600">
-                    <TeamOutlined className="mr-2" />
-                    {cls._count?.classEnrollments ?? 0}{cls.max_students > 0 ? `/${cls.max_students}` : ''}{' '}
-                    học viên
-                  </div>
-
-                  <div className="flex items-center text-gray-600">
-                    <CalendarOutlined className="mr-2" />
-                    <span>{renderDays(cls)}</span>
-                  </div>
-
-                  <div className="flex items-center text-gray-600">
-                    <span className="mr-2">🕐</span>
-                    <span>{renderTime(cls) || 'Chưa có giờ'}</span>
-                  </div>
-
-                  <div className="text-sm text-gray-500 flex items-center gap-1">
-                    <CalendarOutlined className="mr-1" />
-                    {formatDate(cls.start_date)}
-                    <span className="mx-1">→</span>
-                    {formatDate(cls.end_date)}
-                  </div>
-
-                  <Button
-                    type="link"
-                    className="px-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openDetail(`/lms/classes/${cls.id}`);
-                    }}
-                  >
-                    Chi tiết lớp
-                  </Button>
-                </div>
-              </Card>
-            </Col>
-          ))}
-        </Row>
-      )}
-
-      {!loadError && !loading && total > 0 && <Pagination className="mt-5" current={view.page} pageSize={view.pageSize}
-        total={total} showSizeChanger pageSizeOptions={classPageSizes} showTotal={count => `Tổng ${count} lớp`}
-        onChange={(page, pageSize) => updateView({ page: pageSize === view.pageSize ? page : 1, pageSize }, false)} />}
 
       <Modal
         title="Tạo lớp học"

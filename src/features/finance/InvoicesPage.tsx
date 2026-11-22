@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Table, Tag, message, Alert, Typography } from 'antd';
 import { ClockCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons';
@@ -201,16 +202,16 @@ export function InvoicesPage() {
         </Space>
       ),
     },
-    { title: 'Phải thu sau giảm giá', dataIndex: 'payable_amount', align: 'right', render: money },
-    { title: 'Đã thu', dataIndex: 'paid_amount', align: 'right', render: money },
-    { title: 'Còn lại', dataIndex: 'remaining_amount', align: 'right', render: (value) => <Typography.Text strong>{money(value)}</Typography.Text> },
+    { title: 'Phải thu sau giảm giá', dataIndex: 'payable_amount', width: 160, className: 'crm-money-cell', align: 'right', render: money },
+    { title: 'Đã thu', dataIndex: 'paid_amount', width: 145, className: 'crm-money-cell', align: 'right', render: money },
+    { title: 'Còn lại', dataIndex: 'remaining_amount', width: 145, className: 'crm-money-cell', align: 'right', render: (value) => <Typography.Text strong>{money(value)}</Typography.Text> },
     { title: 'Hạn thu', dataIndex: 'due_date', render: billingDate },
     { title: 'Trạng thái', render: (_, record) => <BillingStatusTag status={record.view_status} /> },
     { title: '', render: (_, record) => <Button type="link" onClick={() => setDetailId(record.id)}>Chi tiết</Button> },
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Khoản phải thu"
         breadcrumbs={[
@@ -231,7 +232,7 @@ export function InvoicesPage() {
         message={`Đã tạo ${createResult.created} khoản thu; ${createResult.skipped.length} học viên chưa được tạo`}
         description={<ul>{createResult.skipped.map((item: any) => <li key={item.student_id}>{item.student_name || `#${item.student_id}`}: {item.reason}</li>)}</ul>} />}
       <Card>
-        {!loadError && <Row gutter={16} className="mb-4">
+        {!loadError && <Row gutter={[16, 16]} className="mb-4">
           <Col xs={24} sm={12} lg={6}>
             <Card size="small"><Statistic title="Đang phải thu" value={summary.activeAmount} formatter={(value) => money(Number(value))} /></Card>
           </Col>
@@ -246,19 +247,20 @@ export function InvoicesPage() {
           </Col>
         </Row>}
 
-        <Space className="mb-4 w-full" size={12} wrap>
+        <Space className="crm-filter-controls mb-4 w-full" size={12} wrap>
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="Tìm học viên, SĐT, email, lớp, mã khoản thu"
+            aria-label="Tìm theo học viên, số điện thoại, email, lớp hoặc mã khoản thu"
+            placeholder="Học viên, SĐT, email, lớp, mã thu"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            style={{ width: 360 }}
+            className="crm-filter-search"
           />
           <Select
             value={statusFilter}
             onChange={setStatusFilter}
-            style={{ width: 200 }}
+            className="crm-filter-status"
             options={[
               { label: 'Đang phải thu', value: 'active' },
               { label: 'Quá hạn', value: 'overdue' },
@@ -279,7 +281,7 @@ export function InvoicesPage() {
           dataSource={rows}
           locale={{ emptyText: loadError ? 'Chưa tải được khoản phải thu' : 'Không có khoản phải thu phù hợp' }}
           scroll={{ x: 1120 }}
-          pagination={{ pageSize: 12, showTotal: (total) => `${total} khoản phải thu` }}
+          pagination={paginationProps('khoản phải thu', { defaultPageSize: 10 })}
         />
       </Card>
 

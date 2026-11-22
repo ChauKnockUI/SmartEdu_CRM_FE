@@ -146,6 +146,13 @@ export function getMenuItemsForRole(role: UserRole): MenuItem[] {
 
 export function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    if (!mobile || collapsed) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setCollapsed(true); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [mobile, collapsed]);
   const [guideVisible, setGuideVisible] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
@@ -308,16 +315,22 @@ export function AdminLayout() {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className="crm-app" style={{ minHeight: '100vh' }}>
+      {mobile && !collapsed && <button type="button" className="crm-nav-backdrop" aria-label="Đóng menu điều hướng" onClick={() => setCollapsed(true)} />}
       <Sider
+        className="crm-sidebar"
         trigger={null}
         collapsible
         collapsed={collapsed}
         width={248}
-        style={{ overflow: 'auto', height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0 }}
+        breakpoint="md"
+        collapsedWidth={mobile ? 0 : 80}
+        onBreakpoint={broken => { setMobile(broken); setCollapsed(broken); }}
+        style={{ overflow: 'auto', height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0, zIndex: 40 }}
       >
-        <div className="h-16 flex items-center justify-center border-b border-gray-700">
-          <h1 className="text-white text-lg font-semibold">{collapsed ? 'SE' : 'SmartEdu CRM'}</h1>
+        <div className="crm-brand">
+          <span className="crm-brand-mark"><BookOutlined /></span>
+          {!collapsed && <span className="crm-brand-name">SmartEdu CRM</span>}
         </div>
         <Menu
           theme="dark"
@@ -326,11 +339,11 @@ export function AdminLayout() {
           openKeys={openMenuKeys}
           onOpenChange={setOpenMenuKeys}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key }) => { navigate(key); if (mobile) setCollapsed(true); }}
         />
       </Sider>
 
-      <Layout style={{ marginLeft: collapsed ? 80 : 248, transition: 'all 0.2s' }}>
+      <Layout className="crm-main-layout" style={{ marginLeft: mobile ? 0 : collapsed ? 80 : 248, transition: 'margin-left 0.2s' }}>
         <Header
           style={{
             padding: '0 20px',
@@ -349,6 +362,7 @@ export function AdminLayout() {
               type="text"
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed(!collapsed)}
+              aria-label={collapsed ? 'Mở menu điều hướng' : 'Thu gọn menu điều hướng'}
               style={{ fontSize: 16 }}
             />
             <Input
@@ -473,7 +487,7 @@ export function AdminLayout() {
           </div>
         </Header>
 
-        <Content style={{ margin: 20, padding: 0, minHeight: 280, background: '#f5f6f8' }}>
+        <Content className="crm-content" style={{ padding: 0, minHeight: 280, background: 'transparent' }}>
           <Outlet />
         </Content>
       </Layout>

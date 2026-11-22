@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useRef, useState } from 'react';
 import {
     Alert, Card, Table, Button, Tag, Space,
@@ -263,8 +264,8 @@ export function CoursesPage() {
     ];
 
     return (
-        <div>
-            <PageHeader
+        <div className="crm-page">
+      <PageHeader
                 title="Quản lý Khóa học"
                 description="Danh sách các khóa học"
                 actions={canCreate && <Button type="primary" onClick={handleCreate}>Tạo khóa học</Button>}
@@ -304,15 +305,14 @@ export function CoursesPage() {
                     dataSource={courses}
                     rowKey="id"
                     loading={loading}
-                    pagination={{
+                    pagination={paginationProps('khóa học', {
                         current: pagination.page,
                         pageSize: pagination.limit,
                         total,
-                        showSizeChanger: true,
                         onChange: (page, limit) => setPagination({
                             page: limit === pagination.limit ? page : 1, limit,
                         }),
-                    }}
+                    })}
                 />
             </Card>
             {isModalOpen && canEdit && (

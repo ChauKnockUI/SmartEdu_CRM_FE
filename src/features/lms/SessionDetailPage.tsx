@@ -31,6 +31,7 @@ import { useAuth } from '../../shared/contexts/AuthContext';
 import dayjs from 'dayjs';
 import { SessionStatusTag } from './sessionStatus';
 import { SessionScheduleActions } from './SessionScheduleActions';
+import { summarizeAttendance, isAttendanceAttention } from '../../shared/utils/attendance';
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
 
@@ -288,31 +289,14 @@ export function SessionDetailPage() {
   };
 
   const absenceList = useMemo(
-    () => attendance.filter((item) => item.status === 'absent' || item.status === 'late' || item.status === 'excused'),
-    [attendance]
+    () => access?.cancelled ? [] : attendance.filter(item => isAttendanceAttention(item.status)),
+    [attendance, access?.cancelled]
   );
 
-  const summary = useMemo(() => {
-    const present = attendance.filter((a) => a.status === 'present').length;
-    const absent = attendance.filter((a) => a.status === 'absent').length;
-    const late = attendance.filter((a) => a.status === 'late').length;
-    const excused = attendance.filter((a) => a.status === 'excused').length;
-    const total = attendance.length;
-    const unmarked = attendance.filter(a => !a.status).length;
-    const marked = total - unmarked;
-
-    return {
-      present,
-      absent,
-      late,
-      excused,
-      total,
-      unmarked,
-      rate: marked > 0 ? Math.round(((present + late) / marked) * 100) : null,
-    };
-  }, [attendance]);
+  const summary = useMemo(() => summarizeAttendance(attendance), [attendance]);
 
   const renderStatusTag = (status: AttendanceStatus | null) => {
+    if (access?.cancelled) return <Tag>Không áp dụng điểm danh</Tag>;
     if (!status) return <Tag>Chưa điểm danh</Tag>;
     const config = statusConfig[status];
 
@@ -512,7 +496,7 @@ export function SessionDetailPage() {
   }
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={`Buổi học - ${dayjs(sessionData.date).format('DD/MM/YYYY')}`}
         breadcrumbs={[
@@ -627,7 +611,11 @@ export function SessionDetailPage() {
               columns={attendanceColumns}
               pagination={false}
               scroll={{ x: 800 }}
-              summary={() => (
+              summary={() => access?.cancelled ? (
+                <Table.Summary><Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={4}>Buổi nghỉ/hủy: không áp dụng thống kê điểm danh.</Table.Summary.Cell>
+                </Table.Summary.Row></Table.Summary>
+              ) : (
                 <Table.Summary fixed>
                   <Table.Summary.Row>
                     <Table.Summary.Cell index={0}>
@@ -649,7 +637,8 @@ export function SessionDetailPage() {
                     </Table.Summary.Cell>
 
                     <Table.Summary.Cell index={3}>
-                      Tỉ lệ có mặt trên số đã điểm danh: {summary.rate === null ? '—' : `${summary.rate}%`}
+                      Tỷ lệ tham gia: {summary.rate === null ? 'Chưa có dữ liệu' : `${summary.rate}%`}
+                      <div className="text-xs text-gray-500">Riêng buổi này · (Có mặt + Muộn) / số đã điểm danh, gồm vắng có phép.</div>
                     </Table.Summary.Cell>
                   </Table.Summary.Row>
                 </Table.Summary>
@@ -658,8 +647,8 @@ export function SessionDetailPage() {
           </Card>
         )}
 
-        {canViewAbsenceList && (
-          <Card title="Danh sách vắng / muộn">
+        {canViewAbsenceList && !access?.cancelled && (
+          <Card title="Danh sách vắng / muộn (gồm vắng có phép)">
             <Table
               dataSource={absenceList}
               rowKey="student_id"

@@ -3,6 +3,7 @@ import { ReloadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { getLeadGuidance } from '../leadGuidance';
 import { LeadCareSummary } from './LeadCareSummary';
+import { Disclosure } from '../../../shared/components/Disclosure';
 
 export function LeadConsultationPanel({ lead, activities, onScore, loading }: {
   lead: any; activities: any[]; onScore: () => void; loading: boolean;
@@ -24,7 +25,7 @@ export function LeadConsultationPanel({ lead, activities, onScore, loading }: {
             <div className="mb-1 text-xs font-medium text-blue-700">Gợi ý trao đổi</div>
             <p className="text-sm leading-6 text-gray-700">“{guidance.question}”</p>
           </div>}
-          <p className="mt-3 text-xs leading-5 text-gray-500">Căn cứ: {guidance.reason}</p>
+          <div className="mt-3"><Disclosure label="Căn cứ gợi ý"><p>{guidance.reason}</p></Disclosure></div>
         </Card>
       </Col>
       <Col xs={24} xl={9}>

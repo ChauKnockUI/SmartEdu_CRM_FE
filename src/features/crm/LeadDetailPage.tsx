@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -361,7 +362,10 @@ export function LeadDetailPage() {
                 onClick={() => openActivity()}>{LEAD_ACTIONS.contact}</Button></span></Tooltip>}
             </Empty>}
           </Spin>}
-        {activityPagination.total > activityPagination.pageSize && <Pagination size="small" current={activityPagination.current} total={activityPagination.total} pageSize={activityPagination.pageSize} showSizeChanger={false} onChange={page => fetchActivities(page)} />}
+        {activityPagination.total > activityPagination.pageSize && <Pagination {...paginationProps('hoạt động', {
+          current: activityPagination.current, total: activityPagination.total, pageSize: activityPagination.pageSize,
+          showSizeChanger: false, onChange: page => fetchActivities(page),
+        })} />}
       </Card>,
     },
     {
@@ -384,7 +388,7 @@ export function LeadDetailPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
@@ -424,6 +428,7 @@ export function LeadDetailPage() {
             action={user?.role === 'admin' ? <Button size="small"
               onClick={() => { setAssignSaleId(lead.assigned_to ?? 0); setAssignOpen(true); }}>Phân công sale</Button> : undefined} />
         </div>}
+        <div className="crm-lead-stage">
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-gray-600">Giai đoạn:</span>
           <Tooltip title={lead.status === 'enrolled' ? leadTransitionBlockReason(lead, 'new') : undefined}><span>
@@ -434,9 +439,10 @@ export function LeadDetailPage() {
           </span></Tooltip>
         </div>
         {lead.status !== 'lost' && <div>
-          <Steps size="small" current={LEAD_OPEN_STAGES.findIndex(stage => stage.value === lead.status)}
+          <Steps size="small" responsive={false} titlePlacement="vertical" current={LEAD_OPEN_STAGES.findIndex(stage => stage.value === lead.status)}
             items={LEAD_OPEN_STAGES.map(stage => ({ title: stage.label }))} />
         </div>}
+        </div>
         <div>
           <LeadConsultationPanel lead={lead} activities={latestActivities} onScore={handleScore} loading={saving} />
         </div>

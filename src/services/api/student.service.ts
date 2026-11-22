@@ -1,9 +1,20 @@
 import { getApiConfig } from './apiConfig';
+import type { ScheduleChange } from './schedule.service';
 
 const config = getApiConfig();
 
 export interface StudentListParams {
     page?: number; limit?: number; search?: string; status?: string; class_id?: number; has_debt?: boolean;
+}
+export interface StudentSchedule {
+    id: number; class_id: number | null; date: string; start_time: string | null; end_time: string | null; status: string;
+    class: { id: number; name: string; status: string } | null;
+    teacher: { id: number; full_name: string } | null; room: { id: number; name: string } | null;
+    scheduleChange: Pick<ScheduleChange, 'pendingMakeup' | 'isMakeup' | 'history'>;
+    attendances: { status: string }[];
+}
+export interface StudentScheduleParams {
+    start_date: string; end_date: string; class_id?: number; page?: number; limit?: number;
 }
 const buildStudentQuery = (params?: StudentListParams) => {
     const query = new URLSearchParams();
@@ -13,8 +24,7 @@ const buildStudentQuery = (params?: StudentListParams) => {
     return query.toString();
 };
 
-const getAuthHeader = () => {
-    const token = localStorage.getItem('token');
+const getAuthHeader = (token = localStorage.getItem('token')) => {
 
     return {
         ...config.headers,
@@ -23,6 +33,17 @@ const getAuthHeader = () => {
 };
 
 export const studentService = {
+    getSchedules: async (studentId: number, params: StudentScheduleParams, signal?: AbortSignal, token?: string): Promise<{
+        data: StudentSchedule[]; pagination: { total: number; page: number; limit: number; totalPages: number };
+    }> => {
+        const query = new URLSearchParams();
+        Object.entries(params).forEach(([key, value]) => { if (value !== undefined) query.set(key, String(value)); });
+        const res = await fetch(`${config.baseURL}/students/${studentId}/schedules?${query}`, { headers: getAuthHeader(token), signal });
+        const json = await res.json();
+        if (!res.ok || !json.success || !Array.isArray(json.data) || !Number.isInteger(json.pagination?.total))
+            throw new Error(json.message || 'Không tải được lịch học của học viên.');
+        return json;
+    },
     getEnrollmentOptions: async (signal?: AbortSignal): Promise<{ data: any[] }> => {
         const first = await studentService.getAll({ page: 1, limit: 500, status: 'active' }, signal);
         const data = [...(first.data || [])];

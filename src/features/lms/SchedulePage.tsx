@@ -1,3 +1,4 @@
+import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
@@ -540,7 +541,7 @@ export function SchedulePage() {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="crm-page">
       <PageHeader
         title="Lịch học tổng thể (Master Schedule)"
         breadcrumbs={[
@@ -800,7 +801,7 @@ export function SchedulePage() {
             rowKey="id"
             dataSource={filteredSchedules}
             columns={tableColumns}
-            pagination={{ pageSize: 15, showTotal: (t) => `Tổng cộng ${t} buổi học` }}
+            pagination={paginationProps('buổi học', { defaultPageSize: 10 })}
             locale={{ emptyText: <Empty description="Không có buổi học nào phù hợp với bộ lọc" /> }}
           />
         </Card>

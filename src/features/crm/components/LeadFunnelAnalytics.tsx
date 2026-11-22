@@ -1,3 +1,4 @@
+import { paginationProps } from '../../../shared/utils/pagination';
 import { Alert, Card, Col, Empty, Progress, Row, Table } from 'antd';
 import type { LeadSourceOption } from '@/services/api/lead.service';
 import { getLeadSourceLabel } from '../leadSources';
@@ -41,7 +42,7 @@ export function LeadFunnelAnalytics({ sourceOptions, data, loading, userRole }: 
         </Col>
         <Col xs={24} xl={12}>
           <Card title="Nguồn nào có đăng ký?" loading={loading} styles={{ body: { padding: '0 16px 16px' } }}>
-            <Table size="small" dataSource={sources} rowKey="source" pagination={sources.length > 6 ? { pageSize: 6, showSizeChanger: false } : false} scroll={{ x: 380 }} columns={[
+            <Table size="small" dataSource={sources} rowKey="source" pagination={sources.length > 6 ? paginationProps('nguồn', { pageSize: 6, showSizeChanger: false }) : false} scroll={{ x: 380 }} columns={[
               { title: 'Nguồn', dataIndex: 'source', render: value => getLeadSourceLabel(value, sourceOptions) },
               { title: 'Lead', dataIndex: 'total', align: 'right' },
               { title: 'Đăng ký', dataIndex: 'enrolled', align: 'right' },
