@@ -17,18 +17,13 @@ import {
   Alert,
   TimePicker,
   DatePicker,
-  Upload,
   Popconfirm,
 } from 'antd';
 import {
   EditOutlined,
   CalendarOutlined,
-  UploadOutlined,
-  DownloadOutlined,
-  FileOutlined,
   CheckCircleOutlined,
   WarningOutlined,
-  DeleteOutlined,
 } from '@ant-design/icons';
 import { RiskEstimate, SupportPriority, RiskDetailsDrawer } from '../../shared/components/DropoutRisk';
 import { studentRiskLink, type DropoutRiskView } from '../../shared/utils/dropoutRisk';
@@ -40,10 +35,10 @@ import { classService } from '@/services/api/class.service';
 import { studentService } from '@/services/api/student.service';
 import { scheduleService } from '@/services/api/schedule.service';
 import { SessionAttendanceTag, SessionStatusTag } from './sessionStatus';
-import { materialService } from '@/services/api/material.service';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import dayjs from 'dayjs';
 import { getClassStatus } from './classFilters';
+import { MaterialPanel } from './MaterialPanel';
 
 type Class = any;
 
@@ -144,7 +139,6 @@ export function ClassDetailPage() {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [schedulesLoading, setSchedulesLoading] = useState(false);
   const [schedulesError, setSchedulesError] = useState('');
-  const [materials, setMaterials] = useState<any[]>([]);
 
   const [enrollModalOpen, setEnrollModalOpen] = useState(false);
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
@@ -153,13 +147,9 @@ export function ClassDetailPage() {
 
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editSaving, setEditSaving] = useState(false);
-  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   const [form] = Form.useForm();
-  const [uploadForm] = Form.useForm();
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
 
-  const canUploadMaterial = isAdmin || isTeacher;
   const canEditClass = isAdmin;
 
   const fetchClass = async () => {
@@ -202,15 +192,6 @@ export function ClassDetailPage() {
     } finally { if (context === currentContext.current) setSchedulesLoading(false); }
   };
 
-  const fetchMaterials = async () => {
-    try {
-      const res = await materialService.getByClass(Number(id));
-      setMaterials(res.data || []);
-    } catch {
-      setMaterials([]);
-    }
-  };
-
   useEffect(() => {
     const context = `${id}:${user?.id}:${role}`; currentContext.current = context;
     setEnrollModalOpen(false); setSelectedStudentIds([]);
@@ -220,7 +201,6 @@ export function ClassDetailPage() {
     fetchClass();
     fetchStudents();
     fetchSchedules();
-    fetchMaterials();
     return () => { if (currentContext.current === context) currentContext.current = ''; };
   }, [id, role, user?.id]);
 
@@ -353,40 +333,6 @@ export function ClassDetailPage() {
     } finally { if (context === currentContext.current) setWithdrawLoading(null); }
   };
 
-  const handleUploadMaterial = async () => {
-    try {
-      const values = await uploadForm.validateFields();
-
-      if (!uploadFile) {
-        message.warning('Vui lòng chọn file');
-        return;
-      }
-
-      await materialService.upload(classItem.id, {
-        title: values.title,
-        file: uploadFile,
-      });
-
-      message.success('Tải tài liệu thành công');
-      setUploadModalOpen(false);
-      uploadForm.resetFields();
-      setUploadFile(null);
-      fetchMaterials();
-    } catch (err: any) {
-      message.error(err.message || 'Tải tài liệu thất bại');
-    }
-  };
-
-  const handleDeleteMaterial = async (materialId: number) => {
-    try {
-      await materialService.remove(materialId);
-      message.success('Đã xóa tài liệu');
-      fetchMaterials();
-    } catch (err: any) {
-      message.error(err.message || 'Xóa tài liệu thất bại');
-    }
-  };
-
   const handleScoreClassDropoutRisk = async () => {
     try {
       setRiskLoading(true);
@@ -421,7 +367,7 @@ export function ClassDetailPage() {
       />
 
       <Tabs
-        activeKey={classTab(searchParams.get('tab'))}
+        activeKey={role === 'sale' && searchParams.get('tab') === 'materials' ? 'overview' : classTab(searchParams.get('tab'))}
         onChange={key => setSearchParams(previous => { const next = new URLSearchParams(previous); next.set('tab', key); return next; }, { replace: true, state: navigationState })}
         items={[
           {
@@ -623,76 +569,9 @@ export function ClassDetailPage() {
           {
             key: 'materials',
             label: 'Tài liệu',
-            children: (
-              <Card
-                extra={
-                  canUploadMaterial ? (
-                    <Button
-                      type="primary"
-                      icon={<UploadOutlined />}
-                      onClick={() => setUploadModalOpen(true)}
-                    >
-                      Tải tài liệu lên
-                    </Button>
-                  ) : null
-                }
-              >
-                <Table
-                  rowKey="id"
-                  dataSource={materials}
-                  pagination={paginationProps('tài liệu', { defaultPageSize: 10 })}
-                  locale={{ emptyText: 'Chưa có tài liệu nào' }}
-                  columns={[
-                    {
-                      title: 'Tên tài liệu',
-                      dataIndex: 'title',
-                      render: (title: string) => (
-                        <Space>
-                          <FileOutlined />
-                          {title}
-                        </Space>
-                      ),
-                    },
-                    {
-                      title: 'Tên file',
-                      dataIndex: 'file_name',
-                      render: (fileName: string) => fileName || '—',
-                    },
-                    {
-                      title: 'Ngày tải lên',
-                      dataIndex: 'created_at',
-                      render: (date: string) => formatDate(date),
-                    },
-                    {
-                      title: 'Thao tác',
-                      render: (row: any) => (
-                        <Space>
-                          <Button
-                            size="small"
-                            icon={<DownloadOutlined />}
-                            onClick={() => window.open(row.file_url, '_blank')}
-                          >
-                            Tải xuống
-                          </Button>
-
-                          {canUploadMaterial && (
-                            <Button
-                              danger
-                              size="small"
-                              onClick={() => handleDeleteMaterial(row.id)}
-                            >
-                              Xóa
-                            </Button>
-                          )}
-                        </Space>
-                      ),
-                    },
-                  ]}
-                />
-              </Card>
-            ),
+            children: <MaterialPanel classId={classItem.id} />,
           },
-        ]}
+        ].filter(item => item.key !== 'materials' || ['admin', 'teacher', 'student'].includes(role || ''))}
       />
 
       <RiskDetailsDrawer open={!!selectedRisk} onClose={() => setSelectedRisk(null)} name={selectedRisk?.name}
@@ -782,34 +661,6 @@ export function ClassDetailPage() {
         />
       </Modal>
 
-      <Modal
-        title="Tải tài liệu lên"
-        open={uploadModalOpen}
-        onCancel={() => {
-          setUploadModalOpen(false);
-          setUploadFile(null);
-          uploadForm.resetFields();
-        }}
-        onOk={handleUploadMaterial}
-      >
-        <Form form={uploadForm} layout="vertical">
-          <Form.Item name="title" label="Tên tài liệu" rules={[{ required: true }]}>
-            <Input placeholder="Ví dụ: Bài tập buổi 1" />
-          </Form.Item>
-
-          <Form.Item label="File" required>
-            <Upload
-              beforeUpload={(file) => {
-                setUploadFile(file);
-                return false;
-              }}
-              maxCount={1}
-            >
-              <Button icon={<UploadOutlined />}>Chọn file</Button>
-            </Upload>
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
 }

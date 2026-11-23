@@ -31,6 +31,7 @@ import { useAuth } from '../../shared/contexts/AuthContext';
 import dayjs from 'dayjs';
 import { SessionStatusTag } from './sessionStatus';
 import { SessionScheduleActions } from './SessionScheduleActions';
+import { MaterialPanel } from './MaterialPanel';
 import { summarizeAttendance, isAttendanceAttention } from '../../shared/utils/attendance';
 
 type AttendanceStatus = 'present' | 'absent' | 'late' | 'excused';
@@ -591,6 +592,8 @@ export function SessionDetailPage() {
             </div>
           )}
         </Card>
+
+        {['admin', 'teacher', 'student'].includes(role || '') && <MaterialPanel scheduleId={sessionData.scheduleId} />}
 
         {canEditAttendance && editMode && (
           <Alert
