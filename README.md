@@ -194,6 +194,22 @@ viên xem lịch/tiến độ và học phí. Chi tiết điểm danh nằm tron
 tham gia. Lịch dạy gom buổi hôm nay và sắp tới theo ID để tránh lặp; phân trang
 danh sách dùng dữ liệu đã tải. Cảnh báo vẫn tải độc lập khi tổng quan gặp lỗi.
 
+## Tài liệu lớp và buổi học
+
+`MaterialPanel` dùng chung tại tab Tài liệu của lớp và trang chi tiết buổi học.
+Trang lớp mặc định xem tất cả; trang buổi mặc định xem tài liệu của buổi, có thể
+lọc sang tài liệu chung. Tìm kiếm và phân trang dùng danh sách đã tải, không gọi
+lại API khi chuyển trang. Nút Tải lại lấy dữ liệu mới khi cần.
+
+Hộp tải lên mặc định đúng phạm vi trang đang xem. Có thể sửa tên, đổi phạm vi,
+thay file hoặc xóa có xác nhận. Hai trang đọc cùng bản ghi; thay đổi ở một nơi
+được phản ánh khi mở/tải lại nơi còn lại, các panel đang mở trong cùng trang
+nhận sự kiện `crm:materials-changed`. Nút tải về luôn xin link mới từ BE.
+Học viên chỉ có nút tải về; quyền quản lý dựa vào phản hồi BE. Sale ẩn mục tài liệu.
+
+Cần triển khai BE và migration `20261122120000_materials_by_session` trước FE.
+FE không giữ khóa Supabase hoặc lưu signed URL vào DB/localStorage.
+
 ## 📄 License
 
 MIT License
