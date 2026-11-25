@@ -1,3 +1,5 @@
+import { EnrollmentStudentSelect } from './EnrollmentStudentSelect';
+import { useSearchInput } from '../../shared/hooks/useSearchInput';
 import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -15,6 +17,7 @@ import {
   Popconfirm,
   Progress,
   Empty,
+  Pagination,
 } from 'antd';
 import {
   PlusOutlined,
@@ -28,7 +31,6 @@ import {
 } from '@ant-design/icons';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { classService } from '@/services/api/class.service';
-import { studentService } from '@/services/api/student.service';
 import { getApiConfig } from '@/services/api/apiConfig';
 import { useNavigate, useSearchParams } from 'react-router';
 import dayjs from 'dayjs';
@@ -48,7 +50,7 @@ type Student = any;
 export function SchedulingPage() {
   const [form] = Form.useForm();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const requestedClass = Number(searchParams.get('class_id'));
 
   // State danh sách
@@ -56,9 +58,11 @@ export function SchedulingPage() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
-  const [studentsLoading, setStudentsLoading] = useState(false);
-  const [studentsError, setStudentsError] = useState('');
   const [onlyUnassigned, setOnlyUnassigned] = useState(true);
+  const [classSearch, setClassSearch] = useState(''), [classPage, setClassPage] = useState(1);
+  const [classTotal, setClassTotal] = useState(0), [classesLoading, setClassesLoading] = useState(false), [classesError, setClassesError] = useState('');
+  const classRequest = useRef(0);
+  const { searchDraft: classSearchDraft, setSearchDraft: setClassSearchDraft } = useSearchInput(classSearch, search => { setClassSearch(search); setClassPage(1); });
 
   // Lớp được chọn và chi tiết
   const [selectedClass, setSelectedClass] = useState<Class | null>(null);
@@ -87,28 +91,19 @@ export function SchedulingPage() {
 
   // ================= FETCH CLASSES =================
   const fetchClasses = async () => {
+    const request = ++classRequest.current;
+    setClassesLoading(true); setClassesError('');
     try {
-      const res = await classService.getAll({ limit: 100 });
-      const rows = res.data || [];
-      setClasses(previous => {
-        const selected = previous.find(item => item.id === selectedClassId.current);
-        return selected && !rows.some((item: Class) => item.id === selected.id) ? [...rows, selected] : rows;
-      });
-    } catch {
-      message.error('Lỗi tải danh sách lớp học');
-    }
+      const res = await classService.getAll({ page: classPage, limit: 20, search: classSearch || undefined,
+        unassigned_teacher: onlyUnassigned || undefined });
+      if (request !== classRequest.current) return;
+      const count = res.pagination?.total || 0, last = Math.max(1, Math.ceil(count / 20));
+      if (classPage > last) { setClassPage(last); return; }
+      setClasses(res.data || []); setClassTotal(count);
+    } catch (err: any) { if (request === classRequest.current) { setClasses([]); setClassesError(err.message || 'Không tải được lớp học.'); } }
+    finally { if (request === classRequest.current) setClassesLoading(false); }
   };
-
-  // ================= FETCH STUDENTS =================
-  const fetchAllStudents = async () => {
-    try {
-      setStudentsLoading(true); setStudentsError('');
-      const res = await studentService.getEnrollmentOptions();
-      setAllStudents(res.data);
-    } catch (error: any) {
-      setAllStudents([]); setStudentsError(error.message || 'Không tải được danh sách học viên.');
-    } finally { setStudentsLoading(false); }
-  };
+  useEffect(() => { fetchClasses(); return () => { classRequest.current++; }; }, [classPage, classSearch, onlyUnassigned]);
 
   // ================= FETCH CLASS DETAILS =================
   const fetchClassDetails = async (classId: number) => {
@@ -128,8 +123,6 @@ export function SchedulingPage() {
   };
 
   useEffect(() => {
-    fetchClasses();
-    fetchAllStudents();
     return () => { selectedClassId.current = undefined; detailsRequest.current++; availabilityAbort.current?.abort(); };
   }, []);
 
@@ -255,7 +248,8 @@ export function SchedulingPage() {
         teacher_id: cls.teacher_id || undefined,
       });
       loadAvailable(cls);
-      fetchClassDetails(cls.id);
+      if (requested) { setSelectedClassDetails(requested); setDetailsLoading(false); }
+      else fetchClassDetails(cls.id);
     } else {
       setSelectedClassDetails(null);
       form.setFieldsValue({
@@ -267,14 +261,13 @@ export function SchedulingPage() {
   };
 
   useEffect(() => {
-    if (!Number.isInteger(requestedClass) || requestedClass <= 0 || requestedClass > 2147483647) return;
+    if (!Number.isInteger(requestedClass) || requestedClass <= 0 || requestedClass > 2147483647) { handleClassChange(0); return; }
     let current = true;
     handleClassChange(0);
     classService.getById(requestedClass).then(result => {
       if (!current) return;
       const cls = result.data;
-      setClasses(previous => previous.some(item => item.id === cls.id) ? previous : [...previous, cls]);
-      setOnlyUnassigned(false); handleClassChange(cls.id, cls);
+      handleClassChange(cls.id, cls);
     }).catch(err => { if (current) message.error(err.message || 'Không mở được lớp cần phân công.'); });
     return () => { current = false; };
   }, [requestedClass]);
@@ -310,7 +303,7 @@ export function SchedulingPage() {
       message.warning('Vui lòng chọn ít nhất 1 học viên');
       return;
     }
-    if (enrollLoading || detailsLoading || studentsLoading || studentsError || detailsError || conflictLoading || conflictError
+    if (enrollLoading || detailsLoading || detailsError || conflictLoading || conflictError
       || selectedStudentIds.some(id => typeof conflictsMap[id]?.has_conflict !== 'boolean')) {
       message.warning('Vui lòng tải đủ học viên và kiểm tra lịch trước khi xác nhận.'); return;
     }
@@ -439,7 +432,7 @@ export function SchedulingPage() {
   return (
     <div className="crm-page">
       <PageHeader
-        title="Xếp lớp & Phân bổ tài nguyên"
+        title="Xếp lớp"
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'LMS' },
@@ -451,7 +444,7 @@ export function SchedulingPage() {
               icon={<CalendarOutlined />}
               onClick={() => navigate('/lms/schedule')}
             >
-              Lịch học tổng thể (Calendar)
+              Lịch học
             </Button>
             <Button
               icon={<ReloadOutlined />}
@@ -494,7 +487,7 @@ export function SchedulingPage() {
                 <input
                   type="checkbox"
                   checked={onlyUnassigned}
-                  onChange={(e) => setOnlyUnassigned(e.target.checked)}
+                  onChange={e => { setOnlyUnassigned(e.target.checked); setClassPage(1); }}
                   className="rounded cursor-pointer"
                 />
                 Chỉ hiện lớp chưa có giảng viên
@@ -504,29 +497,21 @@ export function SchedulingPage() {
               name="classId"
               rules={[{ required: true, message: 'Vui lòng chọn lớp học' }]}
             >
-              <Select
-                placeholder={
-                  (onlyUnassigned
-                    ? classes.filter((c) => !c.teacher_id && !c.teacher)
-                    : classes
-                  ).length === 0
-                    ? 'Không có lớp nào chưa có giảng viên'
-                    : 'Chọn lớp học cần phân công'
-                }
-                onChange={id => handleClassChange(id)}
+              <Select aria-label="Tìm lớp cần phân công" placeholder="Tìm tên lớp học"
+                value={selectedClass?.id} loading={classesLoading} showSearch filterOption={false}
+                searchValue={classSearchDraft} onSearch={setClassSearchDraft}
+                onChange={id => setSearchParams(previous => { const next = new URLSearchParams(previous); next.set('class_id', String(id)); return next; })}
                 disabled={assignSaving || enrollLoading || unenrollLoadingId !== null}
-                showSearch
-                optionFilterProp="label"
-                options={(onlyUnassigned
-                  ? classes.filter((c) => !c.teacher_id && !c.teacher)
-                  : classes
-                ).map((c) => ({
-                  label: c.teacher?.full_name
-                    ? `${c.name} (Đang dạy: ${c.teacher.full_name})`
-                    : `${c.name} (Chưa có GV)`,
-                  value: c.id,
-                }))}
-              />
+                labelRender={option => selectedClass && option.value === selectedClass.id ? selectedClass.name : option.label}
+                options={classes
+                  .map(c => ({ value: c.id, label: c.teacher?.full_name ? `${c.name} (${c.teacher.full_name})` : c.name }))}
+                popupRender={menu => <>{menu}<div className="p-2 border-t border-gray-100" onMouseDown={event => event.preventDefault()}>
+                  <Pagination {...paginationProps('lớp', { current: classPage, pageSize: 20, total: classTotal, size: 'small',
+                    showSizeChanger: false, disabled: classesLoading, onChange: setClassPage })} />
+                </div></>} />
+              {classesError && <Alert className="mt-2" type="error" showIcon message={classesError}
+                action={<Button size="small" onClick={fetchClasses}>Thử lại</Button>} />}
+
             </Form.Item>
 
             {/* ROOM SELECT */}
@@ -875,8 +860,8 @@ export function SchedulingPage() {
                       </Button>
                     </Popconfirm>
                   ) : record.status === 'dropped' && ['upcoming', 'ongoing'].includes(selectedClassDetails?.status)
-                    && candidateStudents.some(s => s.id === record.student_id) ? <Button size="small" disabled={detailsLoading || enrollLoading}
-                      onClick={() => { setSelectedStudentIds([record.student_id]); setEnrollModalOpen(true); }}>Ghi danh lại</Button> : '—',
+                    && record.student?.status === 'active' ? <Button size="small" disabled={detailsLoading || enrollLoading}
+                      onClick={() => { setAllStudents([record.student]); setSelectedStudentIds([record.student_id]); setEnrollModalOpen(true); }}>Ghi danh lại</Button> : '—',
                 },
               ]}
             />
@@ -903,7 +888,7 @@ export function SchedulingPage() {
         closable={!enrollLoading}
         maskClosable={!enrollLoading}
         cancelButtonProps={{ disabled: enrollLoading }}
-        okButtonProps={{ disabled: detailsLoading || !!detailsError || studentsLoading || !!studentsError || conflictLoading || !!conflictError
+        okButtonProps={{ disabled: detailsLoading || !!detailsError || conflictLoading || !!conflictError
           || !selectedStudentIds.length || selectedStudentIds.some(id => typeof conflictsMap[id]?.has_conflict !== 'boolean') }}
         width={650}
         okText="Xác nhận thêm học viên"
@@ -912,7 +897,6 @@ export function SchedulingPage() {
         <div className="space-y-4 py-2">
           <Alert type="info" showIcon message="Học viên đã nghỉ có thể ghi danh lại; học phí và dữ liệu cũ được giữ nguyên."
             description="Cho nghỉ lớp hoặc ghi danh lại không tự hủy, hoàn tiền hay tạo thêm học phí. Kiểm tra học phí tại hồ sơ học viên nếu cần điều chỉnh." />
-          {studentsError && <Alert type="error" showIcon message={studentsError} action={<Button onClick={fetchAllStudents}>Thử lại</Button>} />}
           {conflictError && <Alert type="error" showIcon message={conflictError}
             action={<Button onClick={() => setConflictRevision(value => value + 1)}>Thử lại</Button>} />}
           <div className="flex justify-between items-center bg-gray-50 p-2.5 rounded border border-gray-200">
@@ -937,36 +921,13 @@ export function SchedulingPage() {
 
           <div>
             <div className="text-sm font-medium text-gray-700 mb-1">
-              Chọn danh sách học viên ({candidateStudents.length} học viên có thể thêm):
+              Chọn học viên · tìm kiếm và chuyển trang ở danh sách bên dưới
             </div>
-            <Select
-              mode="multiple"
-              className="w-full"
-              placeholder="Gõ tên hoặc email để tìm kiếm và chọn học viên..."
-              value={selectedStudentIds}
-              loading={studentsLoading || conflictLoading}
-              disabled={enrollLoading || studentsLoading || !!studentsError}
-              onChange={setSelectedStudentIds}
-              showSearch
-              filterOption={(input, option) =>
-                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-              options={candidateStudents
-                .filter((s) => !onlyFreeStudents || (conflictsMap[s.id]?.has_conflict === false && !conflictsMap[s.id]?.reason))
-                .map((s) => {
-                  const conflict = conflictsMap[s.id];
-                  const isConflict = conflict?.has_conflict;
-                  const tag = typeof isConflict !== 'boolean' ? '[Chưa kiểm tra]'
-                    : conflict.reason ? `[${conflict.reason}]` : isConflict ? '[Trùng lịch]' : '[Trống lịch]';
-                  const returning = enrolledList.some((item: any) => item.student_id === s.id && item.status === 'dropped');
-                  return {
-                    value: s.id,
-                    label: `${s.full_name} (${s.email || s.phone || 'ID: ' + s.id})${returning ? ' · Ghi danh lại' : ''} - ${tag}`,
-                    disabled: !!conflict?.is_already_enrolled,
-                  };
-                })}
-              maxTagCount="responsive"
-            />
+            {selectedClass && <EnrollmentStudentSelect classId={selectedClass.id} active={enrollModalOpen}
+              value={selectedStudentIds} seedStudents={allStudents} disabled={enrollLoading}
+              conflicts={conflictsMap} onlyFree={onlyFreeStudents} onCandidates={setAllStudents}
+              onChange={(ids) => setSelectedStudentIds(ids)} />}
+
           </div>
 
           {selectedStudentIds.some((id) => conflictsMap[id]?.has_conflict) && (

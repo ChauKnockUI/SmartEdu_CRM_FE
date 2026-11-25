@@ -1,5 +1,11 @@
 import { getApiConfig } from './apiConfig';
 import type { AttendanceSummary } from '../../shared/utils/attendance';
+import type { MaterialSession } from './material.service';
+
+export type DashboardMaterial = {
+  id: number; classId: number; className: string; title: string; date: string;
+  fileName: string; fileSize: number | null; schedule: MaterialSession | null; action: string;
+};
 
 const config = getApiConfig();
 

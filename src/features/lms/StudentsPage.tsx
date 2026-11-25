@@ -29,6 +29,8 @@ import { useAuth } from '../../shared/contexts/AuthContext';
 import { getStudentPermissions } from './studentPermissions';
 import { BillingStatusTag } from '../finance/billingStatus';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { useSearchInput } from '../../shared/hooks/useSearchInput';
+import { clearListCache } from '../../services/api/listCache';
 import { STUDENT_STATUSES, studentStatusColors as STATUS_COLORS, studentStatusLabels as STATUS_LABELS,
   studentPageSizes, readStudentLocation, writeStudentLocation, studentQueryParams, studentExportParams,
   studentClassLabel, type StudentListView } from './studentFilters';
@@ -41,7 +43,7 @@ export function StudentsPage() {
   const { user } = useAuth();
   const { manageProfile, viewFinance, exportStudents: canExport } = getStudentPermissions(user?.role);
   const view = useMemo(() => readStudentLocation(searchParams, viewFinance), [searchParams, viewFinance]);
-  const [searchDraft, setSearchDraft] = useState(view.search);
+  const { searchDraft, setSearchDraft, submitSearch } = useSearchInput(view.search, search => updateView({ search }));
   const identity = `${user?.id}:${user?.role}`;
   const context = `${identity}:${searchParams.toString()}`;
   const latestContext = useRef(context); latestContext.current = context;
@@ -138,7 +140,6 @@ export function StudentsPage() {
     fetchOptions();
     return () => { optionsRequest.current++; optionsAbort.current?.abort(); };
   }, [identity]);
-  useEffect(() => { setSearchDraft(view.search); }, [view.search]);
 
   const handleExport = async () => {
     if (!canExport || exportBusy.current) return;
@@ -292,8 +293,8 @@ export function StudentsPage() {
   const scopedClasses = optionsIdentity === identity ? classes : [];
   const classOptions = scopedClasses.map(item => ({ value: item.id, label: item.name }));
   if (view.classId && !scopedClasses.some(item => item.id === view.classId)) classOptions.push({ value: view.classId, label: 'Lớp học đang chọn' });
-  const visibleStudents = loadedContext === context ? students : [];
-  const visibleTotal = loadedContext === context ? total : 0;
+  const visibleStudents = loadedContext.startsWith(`${identity}:`) ? students : [];
+  const visibleTotal = loadedContext.startsWith(`${identity}:`) ? total : 0;
   const listLoading = loading || loadedContext !== context;
 
   return (
@@ -301,7 +302,7 @@ export function StudentsPage() {
       <PageHeader
         title={user?.role === 'sale' ? 'Học viên phụ trách' : user?.role === 'teacher' ? 'Học viên trong lớp phụ trách' : 'Quản lý Học viên'}
         actions={<Space wrap>
-          <Button icon={<ReloadOutlined />} loading={listLoading} onClick={() => { fetchStudents(); fetchOptions(); }}>Tải lại</Button>
+          <Button icon={<ReloadOutlined />} loading={listLoading} onClick={() => { clearListCache(); fetchStudents(); fetchOptions(); }}>Tải lại</Button>
           {canExport && <Button icon={<ExportOutlined />} loading={exporting} disabled={listLoading || !!loadError || visibleTotal === 0}
             title="Xuất toàn bộ học viên phù hợp bộ lọc trong phạm vi được xem" onClick={handleExport}>Xuất CSV</Button>}
           {manageProfile && <Button
@@ -319,7 +320,7 @@ export function StudentsPage() {
         <Space wrap size={[12, 12]} className="crm-filter-controls mb-4">
           <Input.Search aria-label="Tìm học viên" placeholder="Tên, email, số điện thoại" allowClear maxLength={200}
             className="crm-filter-search" value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
-            onSearch={value => updateView({ search: value.trim() })} />
+            onSearch={submitSearch} />
           <Select aria-label="Lọc học viên theo lớp" placeholder="Lớp học" allowClear showSearch optionFilterProp="label"
             className="crm-filter-select" value={view.classId} options={classOptions} loading={optionsLoading}
             onChange={classId => updateView({ classId })} />

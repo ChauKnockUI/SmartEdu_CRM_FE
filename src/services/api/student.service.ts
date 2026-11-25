@@ -1,10 +1,11 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 import type { ScheduleChange } from './schedule.service';
 
 const config = getApiConfig();
 
 export interface StudentListParams {
-    page?: number; limit?: number; search?: string; status?: string; class_id?: number; has_debt?: boolean;
+    page?: number; limit?: number; search?: string; status?: string; class_id?: number; exclude_class_id?: number; has_debt?: boolean;
 }
 export interface StudentSchedule {
     id: number; class_id: number | null; date: string; start_time: string | null; end_time: string | null; status: string;
@@ -38,30 +39,20 @@ export const studentService = {
     }> => {
         const query = new URLSearchParams();
         Object.entries(params).forEach(([key, value]) => { if (value !== undefined) query.set(key, String(value)); });
-        const res = await fetch(`${config.baseURL}/students/${studentId}/schedules?${query}`, { headers: getAuthHeader(token), signal });
+        const res = await apiFetch(`${config.baseURL}/students/${studentId}/schedules?${query}`, { headers: getAuthHeader(token), signal });
         const json = await res.json();
         if (!res.ok || !json.success || !Array.isArray(json.data) || !Number.isInteger(json.pagination?.total))
             throw new Error(json.message || 'Không tải được lịch học của học viên.');
         return json;
     },
-    getEnrollmentOptions: async (signal?: AbortSignal): Promise<{ data: any[] }> => {
-        const first = await studentService.getAll({ page: 1, limit: 500, status: 'active' }, signal);
-        const data = [...(first.data || [])];
-        const pages = Math.ceil((first.pagination?.total || data.length) / (first.pagination?.limit || 500));
-        for (let page = 2; page <= pages; page++) {
-            const result = await studentService.getAll({ page, limit: 500, status: 'active' }, signal);
-            data.push(...(result.data || []));
-        }
-        return { data };
-    },
     getFilterOptions: async (signal?: AbortSignal): Promise<{ data: { classes: { id: number; name: string }[] } }> => {
-        const res = await fetch(`${config.baseURL}/students/filter-options`, { headers: getAuthHeader(), signal });
+        const res = await apiFetch(`${config.baseURL}/students/filter-options`, { headers: getAuthHeader(), signal });
         const json = await res.json();
         if (!res.ok) throw new Error(json.message || 'Không tải được bộ lọc lớp học');
         return json;
     },
     exportCsv: async (params?: Omit<StudentListParams, 'page' | 'limit'>, signal?: AbortSignal) => {
-        const res = await fetch(`${config.baseURL}/students/export?${buildStudentQuery(params)}`, { headers: getAuthHeader(), signal });
+        const res = await apiFetch(`${config.baseURL}/students/export?${buildStudentQuery(params)}`, { headers: getAuthHeader(), signal });
         if (!res.ok) {
             const error = await res.json();
             throw new Error(error.message || 'Không xuất được danh sách học viên');
@@ -73,7 +64,7 @@ export const studentService = {
     getAll: async (params?: StudentListParams, signal?: AbortSignal) => {
         const query = buildStudentQuery(params);
 
-        const res = await fetch(
+        const res = await apiFetch(
             `${config.baseURL}/students?${query}`,
             {
                 headers: getAuthHeader(),
@@ -90,13 +81,13 @@ export const studentService = {
 
     // ================= DETAIL =================
     getMyProfile: async (signal?: AbortSignal) => {
-        const res = await fetch(`${config.baseURL}/students/me`, { headers: getAuthHeader(), signal });
+        const res = await apiFetch(`${config.baseURL}/students/me`, { headers: getAuthHeader(), signal });
         const json = await res.json();
         if (!res.ok) throw Object.assign(new Error(json.message || 'Không tải được hồ sơ cá nhân'), { status: res.status });
         return json;
     },
     getById: async (id: number, signal?: AbortSignal) => {
-        const res = await fetch(`${config.baseURL}/students/${id}`, {
+        const res = await apiFetch(`${config.baseURL}/students/${id}`, {
             headers: getAuthHeader(),
             signal,
         });
@@ -110,7 +101,7 @@ export const studentService = {
 
     // ================= CREATE =================
     create: async (data: any) => {
-        const res = await fetch(`${config.baseURL}/students`, {
+        const res = await apiFetch(`${config.baseURL}/students`, {
             method: 'POST',
             headers: getAuthHeader(),
             body: JSON.stringify(data),
@@ -127,7 +118,7 @@ export const studentService = {
 
     // ================= UPDATE =================
     update: async (id: number, data: any) => {
-        const res = await fetch(`${config.baseURL}/students/${id}`, {
+        const res = await apiFetch(`${config.baseURL}/students/${id}`, {
             method: 'PUT',
             headers: getAuthHeader(),
             body: JSON.stringify(data),
@@ -141,7 +132,7 @@ export const studentService = {
     },
     // ================= RESET PASSWORD =================
     resetPassword: async (id: number) => {
-        const res = await fetch(
+        const res = await apiFetch(
             `${config.baseURL}/students/${id}/reset-password`,
             {
                 method: 'POST',
@@ -157,7 +148,7 @@ export const studentService = {
     },
 
     scoreDropoutRisk: async (id: number, classId: number) => {
-        const res = await fetch(
+        const res = await apiFetch(
             `${config.baseURL}/students/${id}/dropout-risk/score?class_id=${classId}`,
             {
                 method: 'POST',
@@ -172,7 +163,7 @@ export const studentService = {
         return json;
     },
     getClassDropoutRisks: async (id: number, signal?: AbortSignal) => {
-        const res = await fetch(`${config.baseURL}/students/${id}/dropout-risk`, { headers: getAuthHeader(), signal });
+        const res = await apiFetch(`${config.baseURL}/students/${id}/dropout-risk`, { headers: getAuthHeader(), signal });
         const json = await res.json();
         if (!res.ok) throw new Error(json.message || 'Không tải được đánh giá theo lớp');
         return json;

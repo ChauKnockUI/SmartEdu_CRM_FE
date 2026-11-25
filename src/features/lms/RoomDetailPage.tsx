@@ -1,6 +1,7 @@
+import { detailDescriptions } from '../../shared/utils/detailLayout';
 import { useEffect, useState } from 'react';
 import {
-  Card, Descriptions, Tag, Button, Alert
+  Card, Descriptions, Tag, Alert
 } from 'antd';
 import {
   HomeOutlined, CheckCircleOutlined, CloseCircleOutlined
@@ -9,42 +10,33 @@ import { useParams } from 'react-router';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { roomService } from '@/services/api/room.service';
+import { PageState } from '../../shared/components/PageState';
+import { useAuth } from '../../shared/contexts/AuthContext';
 
 export function RoomDetailPage() {
   const { id } = useParams();
   const { goBack } = useDetailNavigation();
+  const { user, token } = useAuth();
+  const scope = `${id}:${user?.id}:${user?.role}:${token}`;
 
   const [room, setRoom] = useState<any>(null);
-  const [loading, setLoading] = useState(false);
-
-  const fetchRoom = async () => {
-    try {
-      setLoading(true);
-
-      const res = await roomService.getById(Number(id));
-      setRoom(res.data);
-
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const [loading, setLoading] = useState(true), [error, setError] = useState('');
+  const [owner, setOwner] = useState(''), [revision, setRevision] = useState(0);
 
   useEffect(() => {
-    if (id) fetchRoom();
-  }, [id]);
+    const controller = new AbortController();
+    setLoading(true); setError(''); setRoom(null); setOwner(scope);
+    roomService.getById(Number(id), controller.signal)
+      .then(res => { if (!controller.signal.aborted) setRoom(res.data); })
+      .catch(err => { if (!controller.signal.aborted) setError(err.message || 'Không tải được phòng học.'); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [scope, revision]);
 
-  if (!room) {
-    return (
-      <div className="text-center p-8">
-        <h2 className="text-xl font-semibold">Không tìm thấy phòng học</h2>
-        <Button type="primary" onClick={() => goBack()} className="mt-4">
-          Quay lại
-        </Button>
-      </div>
-    );
-  }
+  if (loading || owner !== scope || !room) return <PageState loading={loading || owner !== scope}
+    title={loading || owner !== scope ? 'Đang tải phòng học...' : 'Không tải được phòng học'}
+    description={error || 'Phòng học không tồn tại hoặc không thuộc phạm vi được xem.'}
+    onRetry={() => setRevision(value => value + 1)} onBack={goBack} />;
 
   const equipmentList = room.equipment
     ? room.equipment.split(',')
@@ -70,7 +62,7 @@ export function RoomDetailPage() {
         )}
 
         <Card title="Thông tin phòng học" loading={loading}>
-          <Descriptions column={2} bordered>
+          <Descriptions {...detailDescriptions}>
 
             <Descriptions.Item label="Tên phòng">
               <div className="flex items-center gap-2">
@@ -108,7 +100,7 @@ export function RoomDetailPage() {
                 : '-'}
             </Descriptions.Item>
 
-            <Descriptions.Item label="Thiết bị" span={2}>
+            <Descriptions.Item label="Thiết bị" span="filled">
               {equipmentList.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {equipmentList.map((item: string, idx: number) => (

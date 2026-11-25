@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Upload, message } from 'antd';
-import { DownloadOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Dropdown, Form, Grid, Input, Modal, Select, Space, Table, Tooltip, Upload, message } from 'antd';
+import { DownloadOutlined, FileTextOutlined, MoreOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { materialService, type ClassMaterial, type MaterialList, type MaterialSession } from '../../services/api/material.service';
+import { useSearchParams } from 'react-router';
+import { downloadMaterial, materialFileSize, materialSessionLabel as sessionLabel, materialService, type ClassMaterial, type MaterialList } from '../../services/api/material.service';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { paginationProps } from '../../shared/utils/pagination';
+import { confirmDiscardChanges, formSnapshot } from '../../shared/utils/formChanges';
 
 type Props = { classId: number; scheduleId?: never } | { scheduleId: number; classId?: never };
 const CHANGED = 'crm:materials-changed';
-const time = (value: string | null) => value?.match(/(?:^|T)(\d{2}:\d{2})/)?.[1] || '--:--';
-const sessionLabel = (session: MaterialSession) => `Buổi ${dayjs(session.date).format('DD/MM/YYYY')} · ${time(session.start_time)}–${time(session.end_time)}${session.status === 'cancelled' ? ' (nghỉ)' : ''}`;
 const accepted = '.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.png,.jpg,.jpeg,.zip,.mp3,.mp4';
 
 export function MaterialPanel(props: Props) {
@@ -18,13 +18,17 @@ export function MaterialPanel(props: Props) {
 }
 
 function MaterialPanelContent({ classId, scheduleId }: Props) {
+  const [params] = useSearchParams();
+  const requested = params.get('material_scope');
   const [listing, setListing] = useState<MaterialList | null>(null);
   const [loading, setLoading] = useState(true), [error, setError] = useState(''), [revision, setRevision] = useState(0);
-  const [search, setSearch] = useState(''), [filter, setFilter] = useState<string | number>(scheduleId || 'all');
+  const [search, setSearch] = useState(''), [filter, setFilter] = useState<string | number>(() => requested === 'common' ? 'common'
+    : requested && /^[1-9]\d*$/.test(requested) ? Number(requested) : scheduleId || 'all');
   const [page, setPage] = useState(1), [pageSize, setPageSize] = useState(10);
   const [open, setOpen] = useState(false), [editing, setEditing] = useState<ClassMaterial | null>(null), [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false), [deleting, setDeleting] = useState<number>(), [downloading, setDownloading] = useState<number>();
-  const busy = useRef(false), alive = useRef(true);
+  const busy = useRef(false), alive = useRef(true), original = useRef(''), downloadBusy = useRef(false);
+  const screens = Grid.useBreakpoint();
   const [form] = Form.useForm();
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
@@ -59,7 +63,13 @@ function MaterialPanelContent({ classId, scheduleId }: Props) {
     setEditing(item || null); setFile(null); form.resetFields();
     form.setFieldsValue({ title: item?.title || '', scope: item ? item.schedule_id ?? 'common'
       : scheduleId || (typeof filter === 'number' && uploadOptions.some(option => option.value === filter) ? filter : listing?.can_upload_common ? 'common' : uploadOptions[0]?.value) });
-    setOpen(true);
+    original.current = formSnapshot(form.getFieldsValue(true)); setOpen(true);
+  };
+  const close = () => {
+    if (busy.current) return;
+    confirmDiscardChanges(!!file || formSnapshot(form.getFieldsValue(true)) !== original.current, () => {
+      if (alive.current && !busy.current) setOpen(false);
+    });
   };
   const changed = () => {
     setPage(1);
@@ -92,19 +102,16 @@ function MaterialPanelContent({ classId, scheduleId }: Props) {
     finally { busy.current = false; if (alive.current) setDeleting(undefined); }
   };
   const download = async (item: ClassMaterial) => {
-    if (downloading !== undefined) return;
+    if (downloadBusy.current) return;
+    downloadBusy.current = true;
     setDownloading(item.id);
     try {
-      const result = await materialService.getDownloadUrl(item.id);
-      if (!alive.current) return;
-      const link = document.createElement('a');
-      link.href = result.data.url; link.download = item.file_name; link.rel = 'noopener';
-      document.body.appendChild(link); link.click(); link.remove();
+      await downloadMaterial(item.id, item.file_name);
     } catch (err: any) { if (alive.current) message.error(err.message || 'Không tải được file.'); }
-    finally { if (alive.current) setDownloading(undefined); }
+    finally { downloadBusy.current = false; if (alive.current) setDownloading(undefined); }
   };
 
-  return <Card title={scheduleId ? 'Tài liệu buổi học' : 'Tài liệu'} extra={<Space wrap>
+  return <Card className="crm-material-panel" title={scheduleId ? 'Tài liệu buổi học' : 'Tài liệu lớp học'} extra={<Space wrap>
     <Button icon={<ReloadOutlined />} loading={loading} disabled={saving || deleting !== undefined} onClick={() => setRevision(value => value + 1)}>Tải lại</Button>
     {uploadOptions.length > 0 && <Button type="primary" icon={<UploadOutlined />} disabled={loading || deleting !== undefined} onClick={() => beginEdit()}>Tải lên</Button>}
   </Space>}>
@@ -114,24 +121,29 @@ function MaterialPanelContent({ classId, scheduleId }: Props) {
       <Select className="crm-filter-select" aria-label="Phạm vi tài liệu" showSearch optionFilterProp="label" popupMatchSelectWidth={320}
         value={filter} options={[{ value: 'all', label: 'Tất cả tài liệu' }, ...scopeOptions]} onChange={value => { setFilter(value); setPage(1); }} />
     </Space>
-    <Table<ClassMaterial> rowKey="id" loading={loading} dataSource={filtered} scroll={{ x: 800 }}
+    <Table<ClassMaterial> rowKey="id" loading={loading} dataSource={filtered} tableLayout="fixed" scroll={screens.md ? { x: 850 } : undefined}
       locale={{ emptyText: error ? 'Chưa tải được tài liệu' : 'Chưa có tài liệu phù hợp' }}
       pagination={paginationProps('tài liệu', { current: Math.min(page, Math.max(1, Math.ceil(filtered.length / pageSize))), pageSize,
         total: filtered.length, onChange: (next, size) => { setPage(size === pageSize ? next : 1); setPageSize(size); } })}
       columns={[
-        { title: 'Tài liệu', width: 280, render: (_, item) => <><strong>{item.title}</strong><div className="text-xs text-gray-500">{item.file_name}{item.file_size != null && ` · ${(item.file_size / 1024 / 1024).toFixed(2)} MB`}</div></> },
-        { title: 'Phạm vi', width: 210, render: (_, item) => item.schedule ? sessionLabel(item.schedule) : 'Chung cả lớp' },
-        { title: 'Tải lên', width: 150, render: (_, item) => <>{dayjs(item.created_at).format('DD/MM/YYYY')}<div className="text-xs text-gray-500">{item.users?.full_name}</div></> },
-        { title: 'Thao tác', width: 230, render: (_, item) => <Space wrap>
-          <Button size="small" icon={<DownloadOutlined />} loading={downloading === item.id} disabled={downloading !== undefined && downloading !== item.id} onClick={() => download(item)}>Tải về</Button>
-          {item.can_manage && <><Button size="small" disabled={saving || deleting !== undefined} onClick={() => beginEdit(item)}>Sửa</Button>
-            <Popconfirm title="Xóa tài liệu này?" description="Tài liệu sẽ bị gỡ ở cả trang lớp và buổi học." okText="Xóa" cancelText="Hủy" onConfirm={() => remove(item)}>
-              <Button size="small" danger loading={deleting === item.id} disabled={saving || deleting !== undefined && deleting !== item.id}>Xóa</Button>
-            </Popconfirm></>}
+        { title: 'Tài liệu', width: screens.md ? 280 : undefined, render: (_, item) => <div className="crm-material-copy">
+          <div className="crm-material-title"><FileTextOutlined /><strong>{item.title}</strong></div>
+          <div className="crm-material-meta">{item.file_name}{item.file_size != null && ` · ${materialFileSize(item.file_size)}`}</div>
+          {!screens.md && <div className="crm-material-meta">{item.schedule ? sessionLabel(item.schedule) : 'Chung cả lớp'}</div>}
+        </div> },
+        { title: 'Phạm vi', width: 230, responsive: ['md'], render: (_, item) => item.schedule ? sessionLabel(item.schedule) : 'Chung cả lớp' },
+        { title: 'Người tải lên', width: 160, responsive: ['lg'], render: (_, item) => <>{item.users?.full_name || '—'}<div className="crm-material-meta">{dayjs(item.created_at).format('DD/MM/YYYY')}</div></> },
+        { title: 'Thao tác', width: screens.md ? 170 : 90, render: (_, item) => <Space size={4}>
+          <Tooltip title="Tải về"><Button size="small" aria-label={`Tải về ${item.title}`} icon={<DownloadOutlined />} loading={downloading === item.id} disabled={downloading !== undefined && downloading !== item.id} onClick={() => download(item)}>{screens.md ? 'Tải về' : null}</Button></Tooltip>
+          {item.can_manage && <Dropdown trigger={['click']} menu={{ items: [
+            { key: 'edit', label: 'Chỉnh sửa', onClick: () => beginEdit(item) },
+            { key: 'delete', label: 'Xóa tài liệu', danger: true, onClick: () => Modal.confirm({ title: 'Xóa tài liệu này?',
+              content: 'Tài liệu sẽ bị gỡ ở cả trang lớp và buổi học.', okText: 'Xóa', cancelText: 'Hủy', okButtonProps: { danger: true }, onOk: () => remove(item) }) },
+          ] }}><Button size="small" aria-label={`Quản lý ${item.title}`} icon={<MoreOutlined />} loading={deleting === item.id} disabled={saving || loading || deleting !== undefined} /></Dropdown>}
         </Space> },
       ]} />
     <Modal title={editing ? 'Chỉnh sửa tài liệu' : 'Tải tài liệu lên'} open={open} confirmLoading={saving}
-      okText={editing ? 'Lưu' : 'Tải lên'} cancelText="Hủy" onOk={save} onCancel={() => { if (!busy.current) setOpen(false); }}
+      okText={editing ? 'Lưu' : 'Tải lên'} cancelText="Hủy" onOk={save} onCancel={close}
       closable={!saving} maskClosable={!saving} keyboard={!saving} cancelButtonProps={{ disabled: saving }}>
       <Form form={form} layout="vertical" disabled={saving}>
         <Form.Item name="title" label="Tên tài liệu" rules={[{ required: true, whitespace: true, max: 200, message: 'Nhập tên tài liệu từ 1 đến 200 ký tự.' }]}><Input maxLength={200} /></Form.Item>

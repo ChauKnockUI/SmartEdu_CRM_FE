@@ -26,7 +26,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { financeService } from '../../services/api/finance.service';
 import { InvoiceDetailDrawer } from './InvoiceDetailDrawer';
-import { useSearchParams } from 'react-router';
+import { useListLocation } from '../../shared/hooks/useListLocation';
 import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as getCollectionStatus,
   isCollectibleInvoice, sumBillingMoney, billingDate } from './billingStatus';
 
@@ -48,19 +48,20 @@ const getPriority = (invoice: any) => {
 };
 
 export function PaymentsPage() {
-  const [params, setParams] = useSearchParams();
+  const { params, page, pageSize, setPage, choice, update } = useListLocation({ tab: 'queue' });
   const requestedId = Number(params.get('invoice_id'));
   const invoiceId = Number.isInteger(requestedId) && requestedId > 0 && requestedId <= 2147483647 ? requestedId : undefined;
   const [loadError, setLoadError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const paymentInFlight = useRef(false);
-  const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState(invoiceId ? 'all' : 'collecting');
+  const query = (params.get('search') || '').slice(0, 200);
+  const activeTab = choice('tab', ['queue', 'transactions']);
+  const statusFilter = choice('status', ['collecting', 'all', 'overdue', 'partial', 'pending', 'paid', 'cancelled', 'refunded']) || (invoiceId || activeTab === 'transactions' ? 'all' : 'collecting');
   const [form] = Form.useForm();
 
   const loadInvoices = async () => {
@@ -77,7 +78,6 @@ export function PaymentsPage() {
   };
 
   useEffect(() => {
-    setStatusFilter(invoiceId ? 'all' : 'collecting'); setQuery('');
     loadInvoices();
   }, [invoiceId]);
 
@@ -118,7 +118,7 @@ export function PaymentsPage() {
   }, [invoices, query, statusFilter]);
 
   const transactions = useMemo(
-    () => invoices.flatMap((invoice) =>
+    () => rows.flatMap((invoice) =>
       (invoice.payments || []).map((payment: any) => ({
         ...payment,
         invoice_no: invoice.invoice_no,
@@ -127,8 +127,14 @@ export function PaymentsPage() {
         class_name: invoice.class?.name,
       }))
     ).sort((a, b) => new Date(b.paid_at).getTime() - new Date(a.paid_at).getTime()),
-    [invoices]
+    [rows]
   );
+
+  useEffect(() => {
+    const total = activeTab === 'transactions' ? transactions.length : rows.length;
+    const last = Math.max(1, Math.ceil(total / pageSize));
+    if (!loading && !loadError && page > last) setPage(last);
+  }, [rows.length, transactions.length, activeTab, page, pageSize, loading, loadError]);
 
   const summary = useMemo(() => {
     const collecting = invoices.filter(isCollectibleInvoice);
@@ -284,7 +290,7 @@ export function PaymentsPage() {
       {loadError && <Alert className="mb-4" type="error" showIcon message={loadError} />}
       {invoiceId && <Alert className="mb-4" type={!loading && !loadError && !invoices.length ? 'warning' : 'info'} showIcon
         message={!loading && !loadError && !invoices.length ? 'Không tìm thấy khoản phải thu trong phạm vi được xem.' : `Khoản phải thu đang xem: ${invoices[0]?.invoice_no || 'Đang tải…'}`}
-        action={<Button size="small" onClick={() => setParams(previous => { const next = new URLSearchParams(previous); next.delete('invoice_id'); return next; })}>Xem tất cả</Button>} />}
+        action={<Button size="small" onClick={() => update({ invoice_id: undefined })}>Xem tất cả</Button>} />}
       {!loadError && <Row gutter={[16, 16]} className="mb-4">
         <Col xs={24} sm={12} lg={6}>
           <Card><Statistic title="Cần thu" value={summary.totalDebt} formatter={(value) => money(Number(value))} /></Card>
@@ -308,12 +314,12 @@ export function PaymentsPage() {
             aria-label="Tìm theo học viên, số điện thoại, email, lớp hoặc mã khoản thu"
             placeholder="Học viên, SĐT, email, lớp, mã thu"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={event => update({ search: event.target.value }, true, true)}
             className="crm-filter-search"
           />
           <Select
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={status => update({ status })}
             className="crm-filter-select"
             options={[
               { label: 'Cần xử lý', value: 'collecting' },
@@ -329,7 +335,7 @@ export function PaymentsPage() {
           <Badge count={rows.length} showZero color="#1677ff" />
         </Space>
 
-        <Tabs
+        <Tabs activeKey={activeTab} onChange={tab => update({ tab })}
           items={[
             {
               key: 'queue',
@@ -342,7 +348,7 @@ export function PaymentsPage() {
                   locale={{ emptyText: loadError ? 'Chưa tải được khoản phải thu' : 'Không có khoản phải thu phù hợp' }}
                   rowKey="id"
                   scroll={{ x: 1280 }}
-                  pagination={paginationProps('khoản thu', { defaultPageSize: 10 })}
+                  pagination={paginationProps('khoản thu', { current: page, pageSize, onChange: (next, size) => setPage(size === pageSize ? next : 1, size) })}
                 />
               ),
             },
@@ -355,7 +361,8 @@ export function PaymentsPage() {
                   columns={transactionColumns}
                   dataSource={transactions}
                   rowKey="id"
-                  pagination={paginationProps('giao dịch', { defaultPageSize: 10 })}
+                  scroll={{ x: 1100 }}
+                  pagination={paginationProps('giao dịch', { current: page, pageSize, onChange: (next, size) => setPage(size === pageSize ? next : 1, size) })}
                 />
               ),
             },

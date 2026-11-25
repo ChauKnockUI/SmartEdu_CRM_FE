@@ -1,18 +1,23 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     Card, Table, Button, Tag, Space,
-    Input, Select, Modal, Form, InputNumber, message, Checkbox
+    Input, Select, Modal, Form, InputNumber, message, Checkbox, Alert
 } from 'antd';
 import {
     PlusOutlined, EditOutlined, EyeOutlined,
-    SearchOutlined, HomeOutlined, DeleteOutlined
+    ReloadOutlined, HomeOutlined, DeleteOutlined
 } from '@ant-design/icons';
-import { useNavigate } from 'react-router';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { positiveListNumber, useListLocation } from '../../shared/hooks/useListLocation';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { paginationProps } from '../../shared/utils/pagination';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { roomService } from '@/services/api/room.service';
+import { useAuth } from '../../shared/contexts/AuthContext';
+import { useSearchInput } from '../../shared/hooks/useSearchInput';
+import { clearListCache } from '../../services/api/listCache';
+import { confirmDiscardChanges, formSnapshot } from '../../shared/utils/formChanges';
 
 type Room = any;
 
@@ -23,10 +28,16 @@ const equipmentOptions = [
 ];
 
 export function RoomsPage() {
-    const navigate = useNavigate();
+    const { openDetail } = useDetailNavigation();
+    const { params, page: currentPage, pageSize, setPage, choice, update } = useListLocation({ status: 'all' });
     const { can } = usePermissions();
+    const { user } = useAuth();
+    const identity = `${user?.id}:${user?.role}`;
+    const latestIdentity = useRef(identity); latestIdentity.current = identity;
+    const listRequest = useRef(0);
+    const [dataOwner, setDataOwner] = useState('');
+    const [loadError, setLoadError] = useState('');
 
-    // ❗ rooms chưa có trong permission → dùng tạm classes
     const canCreate = can('rooms', 'write');
     const canEdit = can('rooms', 'write');
     const canDelete = can('rooms', 'delete');
@@ -35,21 +46,33 @@ export function RoomsPage() {
     const [loading, setLoading] = useState(false);
     const [total, setTotal] = useState(0);
 
-    const [searchText, setSearchText] = useState('');
-    const [statusFilter, setStatusFilter] = useState<string>('all');
-    const [minCapacity, setMinCapacity] = useState<number | undefined>();
-
-    const [currentPage, setCurrentPage] = useState(1);
-    const [pageSize, setPageSize] = useState(10);
+    const searchText = (params.get('search') || '').slice(0, 200);
+    const statusFilter = choice('status', ['all', 'active', 'inactive']);
+    const minCapacity = positiveListNumber(params.get('min_capacity'));
+    const { searchDraft, setSearchDraft, submitSearch } = useSearchInput(searchText, search => {
+        update({ search }, true, true);
+    });
 
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingRoom, setEditingRoom] = useState<Room | null>(null);
     const [form] = Form.useForm();
+    const original = useRef('');
+    const saveBusy = useRef(false), alive = useRef(false);
+    const [saving, setSaving] = useState(false);
+    useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+    const snapshot = () => formSnapshot(form.getFieldsValue(true), ['equipment']);
+    const closeModal = () => {
+        if (!saveBusy.current) confirmDiscardChanges(snapshot() !== original.current, () => {
+            if (alive.current && identity === latestIdentity.current && !saveBusy.current) setIsModalOpen(false);
+        });
+    };
 
     // ================= API =================
     const fetchRooms = async () => {
+        const request = ++listRequest.current;
         try {
             setLoading(true);
+            setLoadError('');
 
             const res = await roomService.getAll({
                 page: currentPage,
@@ -61,43 +84,53 @@ export function RoomsPage() {
                 ...(minCapacity && { min_capacity: minCapacity }),
             });
 
+            if (request !== listRequest.current || identity !== latestIdentity.current) return;
+            const lastPage = Math.max(1, Math.ceil((res.pagination?.total || 0) / pageSize));
+            if (currentPage > lastPage) { setPage(lastPage); return; }
             setRooms(res.data || []);
             setTotal(res.pagination?.total || 0);
+            setDataOwner(identity);
 
         } catch (err) {
-            console.error(err);
-            message.error('Lỗi tải phòng học');
+            if (request !== listRequest.current || identity !== latestIdentity.current) return;
+            setRooms([]); setTotal(0); setDataOwner(identity);
+            setLoadError(err instanceof Error ? err.message : 'Lỗi tải phòng học');
         } finally {
-            setLoading(false);
+            if (request === listRequest.current && identity === latestIdentity.current) setLoading(false);
         }
     };
 
     useEffect(() => {
         fetchRooms();
-    }, [currentPage, pageSize, searchText, statusFilter, minCapacity]);
+        return () => { listRequest.current++; };
+    }, [currentPage, pageSize, searchText, statusFilter, minCapacity, identity]);
+    const refresh = () => { clearListCache(); fetchRooms(); };
 
     // ================= ACTION =================
     const handleViewDetail = (id: number) => {
-        navigate(`/lms/rooms/${id}`);
+        openDetail(`/lms/rooms/${id}`);
     };
 
     const handleEdit = (room: Room) => {
+        if (saveBusy.current) return;
         setEditingRoom(room);
-
+        form.resetFields();
         form.setFieldsValue({
-            ...room,
+            name: room.name, capacity: room.capacity, is_active: room.is_active,
             equipment: room.equipment
                 ? room.equipment.split(',')
                 : [],
         });
-
+        original.current = snapshot();
         setIsModalOpen(true);
     };
 
     const handleCreate = () => {
+        if (saveBusy.current) return;
         setEditingRoom(null);
         form.resetFields();
         form.setFieldsValue({ is_active: true });
+        original.current = snapshot();
         setIsModalOpen(true);
     };
 
@@ -119,8 +152,12 @@ export function RoomsPage() {
     };
 
     const handleModalOk = async () => {
+        if (saveBusy.current || !(editingRoom ? canEdit : canCreate)) return;
+        saveBusy.current = true; setSaving(true);
         try {
-            const values = await form.validateFields();
+            let values;
+            try { values = await form.validateFields(); } catch { return; }
+            if (!alive.current || identity !== latestIdentity.current) return;
 
             const payload = {
                 ...values,
@@ -131,18 +168,21 @@ export function RoomsPage() {
 
             if (editingRoom) {
                 await roomService.update(editingRoom.id, payload);
-                message.success('Cập nhật thành công');
             } else {
                 await roomService.create(payload);
-                message.success('Tạo thành công');
             }
-
+            if (!alive.current || identity !== latestIdentity.current) return;
+            message.success(editingRoom ? 'Cập nhật thành công' : 'Tạo thành công');
             setIsModalOpen(false);
             form.resetFields();
             fetchRooms();
 
         } catch (err) {
-            message.error('Lưu thất bại');
+            if (alive.current && identity === latestIdentity.current)
+                message.error(err instanceof Error ? err.message : 'Lưu thất bại');
+        } finally {
+            saveBusy.current = false;
+            if (alive.current) setSaving(false);
         }
     };
 
@@ -211,28 +251,27 @@ export function RoomsPage() {
       <PageHeader
                 title="Quản lý Phòng học"
                 actions={
-                    canCreate && (
+                    <><Button icon={<ReloadOutlined />} loading={loading} onClick={refresh}>Tải lại</Button>{canCreate && (
                         <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
                             Tạo phòng
                         </Button>
-                    )
+                    )}</>
                 }
             />
 
             <Card>
                 <div className="crm-filter-controls mb-4">
-                    <Input
+                    <Input.Search
                         className="crm-filter-search"
                         aria-label="Tìm phòng học"
                         placeholder="Tìm tên phòng học"
                         allowClear
-                        value={searchText}
-                        onChange={e => { setSearchText(e.target.value); setCurrentPage(1); }}
-                        prefix={<SearchOutlined />}
+                        value={searchDraft}
+                        onChange={e => setSearchDraft(e.target.value)} onSearch={submitSearch}
                     />
 
                     <Select className="crm-filter-status" aria-label="Lọc trạng thái phòng"
-                        value={statusFilter} onChange={value => { setStatusFilter(value); setCurrentPage(1); }}>
+                        value={statusFilter} onChange={status => update({ status })}>
                         <Select.Option value="all">Tất cả</Select.Option>
                         <Select.Option value="active">Hoạt động</Select.Option>
                         <Select.Option value="inactive">Tạm dừng</Select.Option>
@@ -244,34 +283,37 @@ export function RoomsPage() {
                         placeholder="Sức chứa tối thiểu"
                         min={1} precision={0}
                         value={minCapacity}
-                        onChange={(v) => { setMinCapacity(v || undefined); setCurrentPage(1); }}
+                        onChange={value => update({ min_capacity: value || undefined })}
                     />
                 </div>
 
+                {loadError && <Alert className="mb-4" type="error" showIcon message={loadError}
+                    action={<Button onClick={refresh}>Thử lại</Button>} />}
                 <Table
                     columns={columns}
-                    dataSource={rooms}
+                    dataSource={dataOwner === identity ? rooms : []}
                     rowKey="id"
                     loading={loading}
                     scroll={{ x: 800 }}
                     pagination={paginationProps('phòng', {
                         current: currentPage,
                         pageSize,
-                        total,
+                        total: dataOwner === identity ? total : 0,
                         onChange: (page, size) => {
-                            setCurrentPage(size === pageSize ? page : 1);
-                            setPageSize(size);
+                            setPage(size === pageSize ? page : 1, size);
                         },
                     })}
                 />
             </Card>
 
             <Modal
-                open={isModalOpen}
+                title={editingRoom ? 'Chỉnh sửa phòng học' : 'Tạo phòng học'}
+                open={isModalOpen && (editingRoom ? canEdit : canCreate)} forceRender
                 onOk={handleModalOk}
-                onCancel={() => setIsModalOpen(false)}
+                onCancel={closeModal} okText="Lưu" cancelText="Hủy" confirmLoading={saving}
+                closable={!saving} maskClosable={!saving} keyboard={!saving} cancelButtonProps={{ disabled: saving }}
             >
-                <Form form={form} layout="vertical">
+                <Form form={form} layout="vertical" disabled={saving}>
                     <Form.Item name="name" label="Tên phòng" rules={[{ required: true }]}>
                         <Input />
                     </Form.Item>

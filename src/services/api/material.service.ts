@@ -14,13 +14,31 @@ export interface MaterialList {
 }
 type MaterialInput = { title: string; schedule_id: number | null; file?: File };
 
+export const materialSessionLabel = (session: MaterialSession) => {
+    const date = session.date.slice(0, 10).split('-').reverse().join('/');
+    const time = (value: string | null) => value?.match(/(?:^|T)(\d{2}:\d{2})/)?.[1] || '--:--';
+    return `Buổi ${date} · ${time(session.start_time)}–${time(session.end_time)}${session.status === 'cancelled' ? ' (nghỉ)' : ''}`;
+};
+export const materialFileSize = (size: number | null | undefined) => size == null ? ''
+    : size < 1024 * 1024 ? Math.max(1, Math.ceil(size / 1024)) + ' KB' : (size / 1024 / 1024).toFixed(1) + ' MB';
+
+export async function downloadMaterial(id: number, fileName: string) {
+    const result = await materialService.getDownloadUrl(id);
+    const response = await fetch(result.data.url);
+    if (!response.ok) throw new Error('Không tải được file. Tệp có thể đã bị xóa hoặc không còn quyền truy cập.');
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a');
+    link.href = url; link.download = fileName; document.body.appendChild(link); link.click(); link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
 const config = getApiConfig();
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const response = await fetch(config.baseURL + path, { ...options,
         headers: { Authorization: 'Bearer ' + localStorage.getItem('token'), ...options.headers },
     });
-    const result = await response.json();
-    if (!response.ok || !result.success) throw new Error(result.message || 'Không xử lý được tài liệu.');
+    const result = await response.json().catch(() => null);
+    if (!response.ok || !result?.success) throw new Error(result?.message || 'Không xử lý được tài liệu. Vui lòng thử lại.');
     return result;
 }
 function formData(data: MaterialInput) {

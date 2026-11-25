@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Alert, Badge, Button, Card, Col, Empty, List, Progress, Row, Space, Spin, Statistic, Tag, Timeline } from 'antd';
+import { SummaryCard as KpiCard } from '../../shared/components/SummaryCard';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Alert, Button, Card, Col, Empty, List, Progress, Row, Segmented, Space, Spin, Tag, Timeline, message } from 'antd';
 import {
   BookOutlined,
   CalendarOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
   DollarOutlined,
+  DownloadOutlined,
   FileTextOutlined,
   PhoneOutlined,
   RiseOutlined,
@@ -18,7 +20,8 @@ import dayjs from 'dayjs';
 import { Link, useNavigate } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { useAuth } from '../../shared/contexts/AuthContext';
-import { dashboardService, type DashboardOverview, type StudentClassProgress } from '../../services/api/dashboard.service';
+import { dashboardService, type DashboardMaterial, type DashboardOverview, type StudentClassProgress } from '../../services/api/dashboard.service';
+import { downloadMaterial, materialFileSize } from '../../services/api/material.service';
 import { leadService } from '../../services/api/lead.service';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { SupportPriority } from '../../shared/components/DropoutRisk';
@@ -32,6 +35,7 @@ import { Disclosure } from '../../shared/components/Disclosure';
 import { InfoHint } from '../../shared/components/InfoHint';
 
 const COLORS = ['#1677ff', '#13c2c2', '#faad14', '#ff7a45', '#722ed1'];
+const dashboardTitles = { admin: 'Tổng quan trung tâm', sale: 'Tổng quan tư vấn', teacher: 'Tổng quan giảng dạy', student: 'Tổng quan học tập' };
 const money = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 0 });
 
 const formatCurrency = (value = 0) => `${money.format(value)} đ`;
@@ -57,45 +61,6 @@ function DashboardCard({ title, extra, children }: { title: string; extra?: Reac
     <Card title={title} extra={extra} styles={{ body: { padding: 16 } }}>
       {children}
     </Card>
-  );
-}
-
-export function KpiCard({
-  title,
-  value,
-  prefix,
-  suffix,
-  currency,
-  to,
-  note,
-}: {
-  title: string;
-  value: number | null;
-  prefix: ReactNode;
-  suffix?: ReactNode;
-  currency?: boolean;
-  to?: string;
-  note?: ReactNode;
-}) {
-  const statistic = (
-    <Statistic
-      value={value ?? 0}
-      prefix={prefix}
-      suffix={currency || value === null ? undefined : suffix}
-      formatter={value === null ? () => 'Chưa có dữ liệu' : currency ? (current) => formatCurrency(Number(current)) : undefined}
-      valueStyle={{ color: '#262626', fontSize: value === null ? 16 : currency ? 22 : 24, lineHeight: 1.2 }}
-    />
-  );
-  return (
-    <Col xs={24} sm={12} lg={6}>
-      <Card className="crm-kpi" styles={{ body: { padding: 16 } }}>
-        <div className="crm-kpi-label">
-          <span>{title}</span>
-          {note && <InfoHint label={`Thông tin ${title}`}>{note}</InfoHint>}
-        </div>
-        {to ? <Link to={to} className="block" aria-label={`Xem ${title}`}>{statistic}</Link> : statistic}
-      </Card>
-    </Col>
   );
 }
 
@@ -165,22 +130,67 @@ export function StudentProgress({ classes = [] }: { classes?: StudentClassProgre
   </>;
 }
 
-function DashboardSchedule({ items, todayIds = [], nextId, onOpen }: {
-  items: any[]; todayIds?: number[]; nextId?: number; onOpen: (id: number) => void;
+function DashboardSchedule({ items, todayIds = [], nextId, onOpen, pageSize = 5, teacher = false, emptyText }: {
+  items: any[]; todayIds?: number[]; nextId?: number; onOpen: (id: number) => void; pageSize?: number; teacher?: boolean; emptyText?: string;
 }) {
-  return <List className="crm-dashboard-list" dataSource={items} rowKey="id"
-    locale={{ emptyText: 'Chưa có buổi học trong 7 ngày tới' }}
-    pagination={items.length > 5 ? paginationProps('buổi học', { pageSize: 5, showSizeChanger: false }) : false}
-    renderItem={item => <List.Item actions={[<Button key="session" type="link" size="small" onClick={() => onOpen(item.id)}>Xem buổi học</Button>]}>
-      <div className="min-w-0">
+  return <List className={`crm-dashboard-list${teacher ? ' crm-teaching-schedule' : ''}`} dataSource={items} rowKey="id"
+    locale={{ emptyText: emptyText || 'Chưa có buổi học trong 7 ngày tới' }}
+    pagination={items.length > pageSize ? paginationProps('buổi học', { pageSize, showSizeChanger: false }) : false}
+    renderItem={item => <List.Item className={teacher && item.id === nextId ? 'crm-session-next' : undefined}
+      actions={[<Button key="session" type={teacher ? 'default' : 'link'} size="small" onClick={() => onOpen(item.id)}>{teacher ? 'Mở buổi' : 'Xem buổi học'}</Button>]}>
+      <div className={teacher ? 'crm-teaching-slot' : 'min-w-0'}>
+        {teacher && <div className="crm-session-time"><strong>{formatTime(item.startTime)}</strong><span>– {formatTime(item.endTime)}</span></div>}
+        <div className="min-w-0">
         <div className="crm-dashboard-item-title"><strong>{item.name}</strong>
           {item.id === nextId ? <Tag color="blue">Buổi tiếp theo</Tag> : todayIds.includes(item.id) && <Tag color="blue">Hôm nay</Tag>}
           {(item.status !== 'scheduled' || item.scheduleChange?.isMakeup || item.scheduleChange?.pendingMakeup)
             && <SessionStatusTag status={item.status} scheduleChange={item.scheduleChange} />}
         </div>
-        <div className="crm-dashboard-meta"><span>{formatDate(item.date)} · {formatTime(item.startTime)}–{formatTime(item.endTime)}</span>
+        <div className="crm-dashboard-meta"><span>{formatDate(item.date)}{!teacher && ` · ${formatTime(item.startTime)}–${formatTime(item.endTime)}`}</span>
           <span>{item.room || 'Chưa có phòng'}</span></div>
+        </div></div>
+    </List.Item>} />;
+}
+
+function TeacherSchedule({ items, todayIds, onOpen }: { items: any[]; todayIds: number[]; onOpen: (id: number) => void }) {
+  const today = items.filter(item => todayIds.includes(item.id));
+  const [period, setPeriod] = useState<'today' | 'week'>(today.length ? 'today' : 'week');
+  const next = items.find(item => new Date(`${String(item.date).slice(0, 10)}T${formatTime(item.startTime)}:00+07:00`).getTime() > Date.now());
+  return <>
+    <div className="crm-agenda-toolbar"><Segmented value={period} onChange={setPeriod}
+      options={[{ value: 'today', label: `Hôm nay (${today.length})` }, { value: 'week', label: `7 ngày (${items.length})` }]} />
+    </div>
+    <DashboardSchedule key={period} items={period === 'today' ? today : items} todayIds={todayIds} nextId={next?.id}
+      teacher pageSize={3} onOpen={onOpen} emptyText={period === 'today' ? 'Hôm nay chưa có lịch dạy' : 'Chưa có lịch dạy trong 7 ngày tới'} />
+  </>;
+}
+
+function TeacherMaterials({ items, onOpen }: { items: DashboardMaterial[]; onOpen: (path: string) => void }) {
+  const [downloading, setDownloading] = useState<number>();
+  const busy = useRef(false), mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const download = async (item: DashboardMaterial) => {
+    if (busy.current) return;
+    busy.current = true; setDownloading(item.id);
+    try { await downloadMaterial(item.id, item.fileName); }
+    catch (error) { if (mounted.current) message.error(error instanceof Error ? error.message : 'Không tải được tài liệu.'); }
+    finally { busy.current = false; if (mounted.current) setDownloading(undefined); }
+  };
+  return <List className="crm-dashboard-materials" rowKey="id" dataSource={items}
+    locale={{ emptyText: 'Chưa có tài liệu trong các lớp và buổi bạn phụ trách' }}
+    pagination={items.length > 3 ? paginationProps('tài liệu gần đây', { pageSize: 3, showSizeChanger: false }) : false}
+    renderItem={item => <List.Item><article className="crm-teacher-file">
+      <div className="crm-material-title" title={item.title}><FileTextOutlined /><strong>{item.title}</strong></div>
+      <div className="crm-file-class" title={item.className}>{item.className || `Lớp #${item.classId}`}</div>
+      <div className="crm-material-meta">{item.schedule
+        ? `Buổi ${dayjs(item.schedule.date).format('DD/MM')} · ${formatTime(item.schedule.start_time || undefined)}` : 'Chung cả lớp'}</div>
+      <div className="crm-file-details" title={item.fileName}><span>{item.fileName?.split('.').pop()?.toUpperCase() || 'Tài liệu'}
+        {item.fileSize != null && ` · ${materialFileSize(item.fileSize)}`}</span><span>Tải lên {formatDate(item.date)}</span></div>
+      <div className="crm-file-actions"><Button size="small" icon={<DownloadOutlined />} loading={downloading === item.id}
+        disabled={!item.fileName || downloading !== undefined && downloading !== item.id} onClick={() => download(item)}>Tải về</Button>
+        <Button type="link" size="small" onClick={() => onOpen(item.action || `/lms/classes/${item.classId}?tab=materials`)}>Mở tài liệu</Button>
       </div>
+    </article>
     </List.Item>} />;
 }
 
@@ -251,10 +261,13 @@ export function DashboardPage() {
     ? 'Các buổi bạn phụ trách · Toàn bộ lịch sử' : 'Tất cả lớp, gồm lớp đã nghỉ · Toàn bộ lịch sử'} />;
 
   return (
-    <div className="crm-page">
-      <PageHeader title={role === 'admin' ? `Chào mừng, ${user?.name || 'Admin'}` : role === 'teacher'
-        ? `Chào Thầy/Cô ${user?.name || ''}` : `Chào ${user?.name || 'bạn'}`}
+    <div className={`crm-page crm-dashboard${role === 'teacher' ? ' crm-teacher-dashboard' : ''}`}>
+      <PageHeader title={dashboardTitles[role]}
+        description={`${user?.name || 'Tài khoản'} · ${new Intl.DateTimeFormat('vi-VN', {
+          timeZone: 'Asia/Ho_Chi_Minh', weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
+        }).format(new Date())}`}
         actions={<Space>
+          {role === 'teacher' && <Button type="primary" icon={<CalendarOutlined />} onClick={() => openDetail('/lms/myschedule')}>Lịch dạy</Button>}
           {role === 'student' && <Button onClick={() => openDetail('/lms/my-profile')}>Hồ sơ của tôi</Button>}
           <Button icon={<ReloadOutlined />} onClick={() => setRevision(value => value + 1)}>Tải lại</Button>
         </Space>} />
@@ -270,11 +283,11 @@ export function DashboardPage() {
 
       {!metricsLoading && !error && data.role === 'admin' && (
         <>
-          <Row gutter={[16, 16]}>
-            <KpiCard title="Lead mới trong tháng" value={kpis.newLeads || 0} prefix={<UserAddOutlined />} to={data.links?.newLeads} note="Theo ngày tạo, bao gồm mọi trạng thái" />
-            <KpiCard title="Tỷ lệ đăng ký" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" to={data.links?.conversionRate} note="Đã đăng ký / tổng Lead" />
-            <KpiCard title="Học viên đang học" value={kpis.activeStudents || 0} prefix={<TeamOutlined />} />
-            <KpiCard title="Doanh thu tháng" value={kpis.monthRevenue || 0} prefix={<DollarOutlined />} currency />
+          <Row className="crm-summary-grid crm-dashboard-kpis" gutter={[16, 16]}>
+            <KpiCard title="Lead mới trong tháng" value={kpis.newLeads || 0} prefix={<UserAddOutlined />} to={data.links?.newLeads} caption="Theo ngày tạo Lead" note="Theo ngày tạo, bao gồm mọi trạng thái" />
+            <KpiCard title="Tỷ lệ đăng ký" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" to={data.links?.conversionRate} caption="Đã đăng ký / tổng Lead" note="Đã đăng ký / tổng Lead" />
+            <KpiCard title="Học viên đang học" value={kpis.activeStudents || 0} prefix={<TeamOutlined />} caption="Hồ sơ đang hoạt động" />
+            <KpiCard title="Doanh thu tháng" value={kpis.monthRevenue || 0} prefix={<DollarOutlined />} currency caption="Theo giao dịch thanh toán" />
           </Row>
 
           <Row className="crm-dashboard-row" gutter={[16, 16]}>
@@ -354,34 +367,34 @@ export function DashboardPage() {
       )}
 
       {!metricsLoading && !error && data.role === 'sale' && (
-          <Row gutter={[16, 16]}>
-            <KpiCard title="Lead của tôi" value={kpis.myLeads || 0} prefix={<UserAddOutlined />} to={data.links?.myLeads} />
-            <KpiCard title="Cần chăm sóc" value={kpis.needsCare || 0} prefix={<PhoneOutlined />} to={data.links?.needsCare} note="Chưa liên hệ hoặc đã quá 3 ngày" />
-            <KpiCard title="Tỷ lệ đăng ký" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" to={data.links?.conversionRate} note="Đã đăng ký / tổng Lead của tôi" />
+          <Row className="crm-summary-grid crm-dashboard-kpis" gutter={[16, 16]}>
+            <KpiCard title="Lead của tôi" value={kpis.myLeads || 0} prefix={<UserAddOutlined />} to={data.links?.myLeads} caption="Lead đang được phân công" />
+            <KpiCard title="Cần chăm sóc" value={kpis.needsCare || 0} prefix={<PhoneOutlined />} to={data.links?.needsCare} caption="Chưa liên hệ hoặc quá 3 ngày" note="Chưa liên hệ hoặc đã quá 3 ngày" />
+            <KpiCard title="Tỷ lệ đăng ký" value={kpis.conversionRate || 0} prefix={<RiseOutlined />} suffix="%" to={data.links?.conversionRate} caption="Trong Lead đang phụ trách" note="Đã đăng ký / tổng Lead của tôi" />
             <KpiCard title="Công nợ cần thu" value={kpis.debtToCollect || 0} prefix={<DollarOutlined />} currency
-              to={data.links?.debtToCollect} note="Học viên từ Lead đang phụ trách" />
+              to={data.links?.debtToCollect} caption="Trong phạm vi phụ trách" note="Học viên từ Lead đang phụ trách" />
           </Row>
       )}
 
       {!metricsLoading && !error && data.role === 'teacher' && (
-          <Row gutter={[16, 16]}>
-            <KpiCard title="Lớp phụ trách" value={kpis.activeClasses || 0} prefix={<BookOutlined />} note="Lớp đang học và sắp mở do bạn phụ trách" />
-            <KpiCard title="Học viên phụ trách" value={kpis.students || 0} prefix={<TeamOutlined />} />
-            <KpiCard title="Buổi dạy trong 7 ngày" value={kpis.sessionsThisWeek || 0} prefix={<CalendarOutlined />} note="Từ hôm nay, không gồm buổi nghỉ/hủy" />
-            <KpiCard title="Tỷ lệ tham gia" value={kpis.attendanceRate ?? null} prefix={<CheckCircleOutlined />} suffix="%" note={attendanceNote} />
+          <Row className="crm-summary-grid crm-dashboard-kpis crm-teacher-kpis" gutter={[16, 16]}>
+            <KpiCard title="Lớp phụ trách" value={kpis.activeClasses || 0} prefix={<BookOutlined />} to="/lms/classes" caption="Đang học và sắp mở" note="Lớp đang học và sắp mở do bạn phụ trách" />
+            <KpiCard title="Học viên phụ trách" value={kpis.students || 0} prefix={<TeamOutlined />} to="/lms/students" caption="Trong các lớp phụ trách" />
+            <KpiCard title="Buổi dạy / 7 ngày" value={kpis.sessionsThisWeek || 0} prefix={<CalendarOutlined />} caption="Từ hôm nay" note="Từ hôm nay, không gồm buổi nghỉ/hủy" />
+            <KpiCard title="Tỷ lệ tham gia" value={kpis.attendanceRate ?? null} prefix={<CheckCircleOutlined />} suffix="%" caption="Các buổi đã kết thúc" note={attendanceNote} />
           </Row>
       )}
 
       {!metricsLoading && !error && data.role === 'student' && (
-          <Row gutter={[16, 16]}>
-            <KpiCard title="Tỷ lệ tham gia" value={kpis.attendanceRate ?? null} prefix={<CheckCircleOutlined />} suffix="%" note={attendanceNote} />
-            <KpiCard title="Buổi đã tham gia" value={kpis.attendedSessions || 0} prefix={<BookOutlined />} note="Có mặt + đi muộn" />
-            <KpiCard title="Buổi vắng không phép" value={kpis.absentSessions || 0} prefix={<CloseCircleOutlined />} />
-            <KpiCard title="Bài tập chưa nộp" value={kpis.missingAssignments || 0} prefix={<FileTextOutlined />} />
+          <Row className="crm-summary-grid crm-dashboard-kpis" gutter={[16, 16]}>
+            <KpiCard title="Tỷ lệ tham gia" value={kpis.attendanceRate ?? null} prefix={<CheckCircleOutlined />} suffix="%" caption="Các buổi đã kết thúc" note={attendanceNote} />
+            <KpiCard title="Buổi đã tham gia" value={kpis.attendedSessions || 0} prefix={<BookOutlined />} caption="Có mặt và đi muộn" note="Có mặt + đi muộn" />
+            <KpiCard title="Buổi vắng không phép" value={kpis.absentSessions || 0} prefix={<CloseCircleOutlined />} caption="Theo điểm danh đã ghi nhận" />
+            <KpiCard title="Bài tập thiếu / muộn" value={kpis.missingAssignments || 0} prefix={<FileTextOutlined />} caption="Chưa nộp hoặc nộp muộn" />
           </Row>
       )}
       {role !== 'admin' && <Row gutter={[16, 16]}>
-        <Col xs={24} lg={16} className="crm-dashboard-stack">
+        <Col xs={24} lg={role === 'teacher' ? 15 : 16} className="crm-dashboard-stack">
           {metricsLoading && <Card><div className="flex min-h-[160px] items-center justify-center"><Spin /></div></Card>}
           {error && <DashboardCard title="Tổng quan"><EmptyState text="Chưa tải được nội dung tổng quan" /></DashboardCard>}
           {overviewReady && role === 'sale' && <>
@@ -396,19 +409,9 @@ export function DashboardPage() {
             </DashboardCard>
           </>}
           {overviewReady && role === 'teacher' && <>
-            <DashboardCard title="Lịch dạy trong 7 ngày" extra={<Link to="/lms/myschedule">Xem lịch</Link>}>
-              <DashboardSchedule items={teacherSessions} todayIds={(lists.todayClasses || []).map((item: any) => item.id)}
+            <DashboardCard title="Lịch dạy" extra={<Link to="/lms/myschedule">Xem toàn bộ lịch</Link>}>
+              <TeacherSchedule items={teacherSessions} todayIds={(lists.todayClasses || []).map((item: any) => item.id)}
                 onOpen={id => openDetail(`/lms/sessions/${id}`)} />
-            </DashboardCard>
-            <DashboardCard title="Học viên cần hỗ trợ" extra={<Space><Badge count={kpis.supportCases || 0} />
-              <Link to={data.links?.dropoutAttention || '/ai/predictions?risk_level=attention'}>Xem tất cả</Link></Space>}>
-              <List className="crm-dashboard-list" dataSource={lists.attentionStudents || []} rowKey="id"
-                locale={{ emptyText: 'Chưa có học viên cần hỗ trợ' }}
-                pagination={(lists.attentionStudents || []).length > 5 ? paginationProps('học viên theo lớp', { pageSize: 5, showSizeChanger: false }) : false}
-                renderItem={(item: any) => <List.Item actions={[<Button key="support" type="link" size="small" onClick={() => openDetail(item.action)}>Xem hồ sơ</Button>]}>
-                  <div className="min-w-0"><div className="crm-dashboard-item-title"><strong>{item.name}</strong><SupportPriority data={item.risk} /></div>
-                    <div className="crm-dashboard-meta">{item.className}</div></div>
-                </List.Item>} />
             </DashboardCard>
           </>}
           {overviewReady && role === 'student' && <>
@@ -419,8 +422,19 @@ export function DashboardPage() {
             <DashboardCard title="Tiến độ lớp học"><StudentProgress classes={lists.classProgress} /></DashboardCard>
           </>}
         </Col>
-        <Col xs={24} lg={8} className="crm-dashboard-stack">
-          <DashboardWorkCard key={scope} revision={revision} alerts={summaryAlerts} />
+        <Col xs={24} lg={role === 'teacher' ? 9 : 8} className="crm-dashboard-stack">
+          <DashboardWorkCard key={scope} revision={revision} alerts={summaryAlerts}
+            onReload={role === 'teacher' ? () => setRevision(value => value + 1) : undefined}
+            extraGroup={overviewReady && role === 'teacher' ? { title: 'Học viên cần hỗ trợ', count: kpis.supportCases || 0, content: <>
+              <List className="crm-dashboard-list" dataSource={lists.attentionStudents || []} rowKey="id"
+              locale={{ emptyText: 'Chưa có học viên cần hỗ trợ' }}
+              pagination={(lists.attentionStudents || []).length > 3 ? paginationProps('học viên theo lớp', { pageSize: 3, showSizeChanger: false }) : false}
+              renderItem={(item: any) => <List.Item actions={[<Button key="support" type="link" size="small" onClick={() => openDetail(item.action)}>Xem hồ sơ</Button>]}>
+                <div className="min-w-0"><div className="crm-dashboard-item-title"><strong>{item.name}</strong><SupportPriority data={item.risk} /></div>
+                  <div className="crm-dashboard-meta">{item.className}</div></div>
+              </List.Item>} />
+              <Link className="mt-4 inline-block" to={data.links?.dropoutAttention || '/ai/predictions?risk_level=attention'}>Xem tất cả trường hợp cần hỗ trợ</Link>
+            </> } : undefined} />
           {overviewReady && role === 'student' && <DashboardCard title="Học phí gần đây" extra={<Link to="/lms/my-profile?tab=finance">Xem tất cả</Link>}>
             <List className="crm-dashboard-list" dataSource={lists.invoices || []} rowKey="id"
               locale={{ emptyText: 'Chưa có khoản học phí' }}
@@ -432,7 +446,7 @@ export function DashboardPage() {
                 <div className="crm-dashboard-item-title mt-1"><span>Còn lại: <strong>{formatCurrency(item.remainingAmount || 0)}</strong></span><BillingStatusTag status={item.status} /></div>
               </div></List.Item>} />
           </DashboardCard>}
-          {overviewReady && (role === 'teacher' || role === 'student') && <DashboardCard title="Tài liệu mới">
+          {overviewReady && role === 'student' && <DashboardCard title="Tài liệu mới">
             <List className="crm-dashboard-list" dataSource={lists.materials || []} rowKey="id"
               locale={{ emptyText: 'Chưa có tài liệu' }}
               renderItem={(item: any) => <List.Item actions={[<Button key="material" type="link" size="small" disabled={!item.classId}
@@ -442,6 +456,9 @@ export function DashboardPage() {
           </DashboardCard>}
         </Col>
       </Row>}
+      {overviewReady && role === 'teacher' && <DashboardCard title="Tài liệu gần đây" extra={<Link to="/lms/classes">Lớp phụ trách</Link>}>
+        <TeacherMaterials key={scope} items={lists.materials || []} onOpen={openDetail} />
+      </DashboardCard>}
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { useListLocation } from '../../shared/hooks/useListLocation';
 import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Card, Col, Input, Progress, Row, Select, Space, Statistic, Table, Typography } from 'antd';
@@ -14,11 +15,12 @@ const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} 
 export function DebtsPage() {
   const { openDetail } = useDetailNavigation();
   const [loadError, setLoadError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [detailId, setDetailId] = useState<number | null>(null);
   const [debts, setDebts] = useState<any[]>([]);
-  const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState('all');
+  const { params, page, pageSize, setPage, choice, update } = useListLocation({ status: 'all' });
+  const query = (params.get('search') || '').slice(0, 200);
+  const filter = choice('status', ['all', 'overdue', 'partial', 'pending']);
 
   const loadDebts = async () => {
     try {
@@ -56,6 +58,11 @@ export function DebtsPage() {
       if (priority !== 0) return priority;
       return Number(b.debt_amount || 0) - Number(a.debt_amount || 0);
     }), [debts, filter, query]);
+
+  useEffect(() => {
+    const last = Math.max(1, Math.ceil(rows.length / pageSize));
+    if (!loading && !loadError && page > last) setPage(last);
+  }, [rows.length, page, pageSize, loading, loadError]);
 
   const totalDebt = sumBillingMoney(debts, 'debt_amount');
   const overdueDebt = sumBillingMoney(debts.filter(item => statusOf(item) === 'overdue'), 'debt_amount');
@@ -142,12 +149,12 @@ export function DebtsPage() {
             aria-label="Tìm theo học viên, số điện thoại, email, lớp hoặc mã khoản thu"
             placeholder="Học viên, SĐT, email, lớp, mã thu"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={event => update({ search: event.target.value }, true, true)}
             className="crm-filter-search"
           />
           <Select
             value={filter}
-            onChange={setFilter}
+            onChange={status => update({ status })}
             className="crm-filter-status"
             options={[
               { label: 'Tất cả công nợ', value: 'all' },
@@ -165,7 +172,7 @@ export function DebtsPage() {
           dataSource={rows}
           locale={{ emptyText: loadError ? 'Chưa tải được công nợ' : 'Không có công nợ phù hợp' }}
           scroll={{ x: 1100 }}
-          pagination={paginationProps('khoản công nợ', { defaultPageSize: 10 })}
+          pagination={paginationProps('khoản công nợ', { current: page, pageSize, onChange: (next, size) => setPage(size === pageSize ? next : 1, size) })}
         />
       </Card>
       <InvoiceDetailDrawer invoiceId={detailId} onClose={() => setDetailId(null)} onChanged={loadDebts} />

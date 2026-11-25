@@ -12,7 +12,6 @@ import {
   Pagination,
   Select,
   Space,
-  Switch,
   Table,
   Tabs,
   Tag,
@@ -40,14 +39,17 @@ import { LeadPipelineBoard } from './components/LeadPipelineBoard';
 import { LeadFunnelAnalytics } from './components/LeadFunnelAnalytics';
 import { MarkLostModal } from './components/MarkLostModal';
 import { LeadEnrollmentModal } from './components/LeadEnrollmentModal';
+import { LeadAssignmentModal } from './components/LeadAssignmentModal';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { useSearchInput } from '../../shared/hooks/useSearchInput';
+import { clearListCache } from '../../services/api/listCache';
 import { getLeadScore } from './leadScore';
 import { LeadCareSummary } from './components/LeadCareSummary';
 import { getLeadSourceLabel } from './leadSources';
 import { getLeadGuidance } from './leadGuidance';
 import { LeadOverviewStats } from './components/LeadOverviewStats';
-import { getLeadAssigneeOptions, hasLeadAssignee, canUnassignLead, leadContactBlockReason, leadConvertBlockReason } from './leadAssignment';
-import { readLeadLocation, writeLeadLocation, type LeadViewMode } from './leadFilters';
+import { hasLeadAssignee, leadContactBlockReason, leadConvertBlockReason } from './leadAssignment';
+import { readLeadLocation, writeLeadLocation, getLeadCareState, LEAD_CARE_OPTIONS, type LeadViewMode } from './leadFilters';
 import { LEAD_STATUSES, getLeadStatus, LEAD_ACTIONS, LEAD_MESSAGES } from './leadStatus';
 
 const { RangePicker } = DatePicker;
@@ -112,6 +114,9 @@ export function LeadsListPage() {
   const { filters, viewMode } = useMemo(() => readLeadLocation(searchParams), [searchParams]);
   const filterKey = writeLeadLocation(filters, 'pipeline').toString();
   const { user } = useAuth();
+  const identity = `${user?.id}:${user?.role}`;
+  const latestIdentity = useRef(identity); latestIdentity.current = identity;
+  const [dataOwner, setDataOwner] = useState('');
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [importVisible, setImportVisible] = useState(false);
   const [form] = Form.useForm();
@@ -119,9 +124,8 @@ export function LeadsListPage() {
   const [sourceOptions, setSourceOptions] = useState<LeadSourceOption[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [sales, setSales] = useState<any[]>([]);
-  const [assignLead, setAssignLead] = useState<any>(null);
-  const [assignSaleId, setAssignSaleId] = useState(0);
-  const [assigning, setAssigning] = useState(false);
+  const [assignment, setAssignment] = useState<{ leads: any[]; bulk: boolean; owner: string } | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [overview, setOverview] = useState<any>(null);
@@ -130,7 +134,7 @@ export function LeadsListPage() {
   const [importing, setImporting] = useState(false);
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
-  const [searchDraft, setSearchDraft] = useState(filters.search || '');
+  const { searchDraft, setSearchDraft, submitSearch } = useSearchInput(filters.search || '', search => handleFilterChange({ search: search || undefined }));
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50, total: 0 });
   const [lostTargetLead, setLostTargetLead] = useState<any | null>(null);
   const latestView = useRef({ filters, pagination });
@@ -148,6 +152,7 @@ export function LeadsListPage() {
         course_id: nextFilters.course_id,
         assigned_to: nextFilters.assigned_to,
         needs_care: nextFilters.needs_care || undefined,
+        care: nextFilters.care,
         search: nextFilters.search,
         date_from: nextFilters.dateRange?.[0]?.startOf('day').toISOString(),
         date_to: nextFilters.dateRange?.[1]?.endOf('day').toISOString(),
@@ -155,11 +160,13 @@ export function LeadsListPage() {
         sort_dir: 'desc',
       };
       const [res, report] = await Promise.all([leadService.getAll(params), leadService.getFunnel(params)]);
-      if (requestId !== listRequest.current) return;
+      if (requestId !== listRequest.current || identity !== latestIdentity.current) return;
       const lastPage = Math.max(1, Math.ceil((res.pagination?.total || 0) / pageSize));
       if (page > lastPage) return fetchLeads(lastPage, pageSize, nextFilters);
       setLeads(res.data || []);
+      setSelectedIds([]);
       setOverview(report.data);
+      setDataOwner(identity);
       setLoadError('');
       setPagination({
         current: res.pagination?.page || page,
@@ -167,13 +174,14 @@ export function LeadsListPage() {
         total: res.pagination?.total || 0,
       });
     } catch (err: any) {
-      if (requestId === listRequest.current) setLoadError(err.message || 'Không tải được danh sách lead');
+      if (requestId === listRequest.current && identity === latestIdentity.current) setLoadError(err.message || 'Không tải được danh sách lead');
     } finally {
-      if (requestId === listRequest.current) setLoading(false);
+      if (requestId === listRequest.current && identity === latestIdentity.current) setLoading(false);
     }
   };
 
   const refreshList = (resetPage = false) => {
+    clearListCache();
     const current = latestView.current;
     return fetchLeads(resetPage ? 1 : current.pagination.current, current.pagination.pageSize, current.filters);
   };
@@ -224,7 +232,7 @@ export function LeadsListPage() {
 
   // Tab changes retain pagination; only actual filters or the current user reload page 1.
   useEffect(() => {
-    setSearchDraft(filters.search || '');
+    setSelectedIds([]);
     fetchLeads(1, pagination.pageSize, filters);
   }, [filterKey, user?.id, user?.role]);
 
@@ -235,6 +243,8 @@ export function LeadsListPage() {
 
   const handleFilterChange = (patch: any) => {
     const next = { ...filters, ...patch };
+    if (patch.care === 'unassigned') next.assigned_to = undefined;
+    if (patch.assigned_to !== undefined && next.care === 'unassigned') next.care = undefined;
     setSearchParams(writeLeadLocation(next, viewMode), { replace: true });
   };
 
@@ -290,29 +300,7 @@ export function LeadsListPage() {
   };
 
   const openAssignModal = (lead: any) => {
-    setAssignLead(lead);
-    setAssignSaleId(lead.assigned_to ?? 0);
-  };
-
-  const handleAssignLead = async () => {
-    if (!assignLead || assigning) return;
-    if (assignSaleId === (assignLead.assigned_to ?? 0)) {
-      setAssignLead(null);
-      return;
-    }
-
-    try {
-      setAssigning(true);
-      await leadService.update(String(assignLead.id), { assigned_to: assignSaleId === 0 ? null : assignSaleId });
-      message.success(assignSaleId === 0 ? LEAD_MESSAGES.unassigned : LEAD_MESSAGES.assigned);
-      setAssignLead(null);
-      setAssignSaleId(0);
-      refreshList();
-    } catch (err: any) {
-      message.error(err.message || LEAD_MESSAGES.assignFailed);
-    } finally {
-      setAssigning(false);
-    }
+    setAssignment({ leads: [lead], bulk: false, owner: identity });
   };
 
   const handleCsvFile: UploadProps['beforeUpload'] = async (file) => {
@@ -410,8 +398,16 @@ export function LeadsListPage() {
       !hasLeadAssignee(record) && !['enrolled', 'lost'].includes(record.status) ? 'Phân công Sale phụ trách' : getLeadGuidance(record).title}</span> },
     { title: 'Phụ trách', render: (_, record) => record.assignedUser?.full_name || 'Chưa phân công' },
     {
-      title: 'Liên hệ gần nhất',
-      render: (_, record) => record.last_contacted ? dayjs(record.last_contacted).format('DD/MM/YYYY') : '-',
+      title: 'Theo dõi liên hệ',
+      width: 180,
+      render: (_, record) => {
+        const care = getLeadCareState(record);
+        return care ? <Tooltip title={care.since ? dayjs(care.since).format('DD/MM/YYYY HH:mm') : undefined}>
+          <div className="text-sm"><span className={record.last_contacted && record.assigned_to ? 'text-red-600' : 'text-gray-700'}>{care.reason}</span>
+            {care.waiting !== null && <div className="text-xs text-gray-500">{record.last_contacted && record.assigned_to
+              ? `${care.waiting} ngày chưa liên hệ lại` : care.waiting ? `Tạo ${care.waiting} ngày trước` : 'Tạo hôm nay'}</div>}
+          </div></Tooltip> : record.last_contacted ? dayjs(record.last_contacted).format('DD/MM/YYYY') : '—';
+      },
     },
     {
       title: 'Hành động',
@@ -434,14 +430,18 @@ export function LeadsListPage() {
     },
   ], [navigate, user?.role, pagination.current, sourceOptions]);
 
-  const tableData = leads;
+  const tableData = dataOwner === identity ? leads : [];
+  const visibleOverview = dataOwner === identity ? overview : null;
   const listFilters = <div className="crm-filter-controls mb-4 items-center">
-    <Input.Search aria-label="Tìm lead" placeholder="Tên, số điện thoại, email" allowClear className="crm-filter-search" value={searchDraft} onChange={event => setSearchDraft(event.target.value)} onSearch={search => handleFilterChange({ search: search.trim() || undefined })} />
+    <Input.Search aria-label="Tìm lead" placeholder="Tên, số điện thoại, email" allowClear className="crm-filter-search" value={searchDraft} onChange={event => setSearchDraft(event.target.value)} onSearch={submitSearch} />
     <Select aria-label="Lọc giai đoạn" placeholder="Tất cả giai đoạn" allowClear className="crm-filter-status" value={filters.status} options={LEAD_STATUSES.map(({ value, label }) => ({ value, label }))} onChange={status => handleFilterChange({ status })} />
     <Select aria-label="Lọc nguồn lead" placeholder="Tất cả nguồn" allowClear className="crm-filter-status" value={filters.source} options={sourceOptions} onChange={source => handleFilterChange({ source })} />
     <Select aria-label="Lọc khóa học" placeholder="Tất cả khóa học" allowClear className="crm-filter-select" value={filters.course_id} options={courseOptions} onChange={course_id => handleFilterChange({ course_id })} />
     {user?.role === 'admin' && <Select aria-label="Lọc sale phụ trách" placeholder="Tất cả sale" allowClear className="crm-filter-select" value={filters.assigned_to} options={[{ label: 'Chưa phân công', value: 'unassigned' }, ...sales.map(sale => ({ label: sale.full_name, value: sale.id }))]} onChange={assigned_to => handleFilterChange({ assigned_to })} />}
-    <Space size={6}><Switch size="small" aria-label="Chỉ lead cần chăm sóc" checked={Boolean(filters.needs_care)} onChange={needs_care => handleFilterChange({ needs_care })} /><Tooltip title="Lead chưa liên hệ hoặc đã quá 3 ngày chưa liên hệ lại; chỉ tính lead đang chăm sóc."><span className="text-xs text-gray-600">Cần chăm sóc (&gt;3 ngày)</span></Tooltip></Space>
+    <Select aria-label="Lọc nhóm chăm sóc" placeholder="Tất cả nhóm chăm sóc" allowClear className="crm-filter-select"
+      value={filters.care || (filters.needs_care ? 'needs_care' : undefined)}
+      options={LEAD_CARE_OPTIONS.filter(item => user?.role === 'admin' || item.value !== 'unassigned')}
+      onChange={care => handleFilterChange({ care: care === 'needs_care' ? undefined : care, needs_care: care === 'needs_care' })} />
     <RangePicker aria-label="Lọc ngày tạo" placeholder={['Tạo từ ngày', 'Đến ngày']} value={filters.dateRange} onChange={dateRange => handleFilterChange({ dateRange })} />
     {Object.values(filters).some(Boolean) && <Button type="link" size="small" onClick={() => { setSearchDraft(''); setSearchParams(writeLeadLocation({}, viewMode), { replace: true }); }}>Xóa bộ lọc</Button>}
   </div>;
@@ -467,8 +467,8 @@ export function LeadsListPage() {
       <div className="mb-4 space-y-2">
         {loadError && <Alert type="error" showIcon message={loadError} description="Chưa tải được dữ liệu mới. Dữ liệu đang hiển thị thuộc lần tải thành công trước đó."
           action={<Button size="small" onClick={() => refreshList()}>Thử lại</Button>} />}
-        <LeadOverviewStats data={overview} loading={loading} manager={user?.role === 'admin'} />
-        <div className="text-xs text-gray-500">Tổng quan theo bộ lọc hiện tại · {overview?.summary?.totalLeads ?? '—'} lead</div>
+        <LeadOverviewStats data={visibleOverview} loading={loading} manager={user?.role === 'admin'} />
+        <div className="text-xs text-gray-500">Tổng quan theo bộ lọc hiện tại · {visibleOverview?.summary?.totalLeads ?? '—'} lead</div>
       </div>
 
       <div className="crm-surface">
@@ -482,14 +482,14 @@ export function LeadsListPage() {
               label: 'Phễu bán hàng',
               children: (<div>
                 <LeadPipelineBoard
-                  leads={leads}
+                  leads={tableData}
                   sourceOptions={sourceOptions}
                   loading={loading}
                   onRefresh={() => refreshList()}
                   onConvert={handleConvert}
                   includeLost={filters.status === 'lost'}
                 />
-                <Pagination {...paginationProps('lead', { current: pagination.current, pageSize: pagination.pageSize, total: pagination.total,
+                <Pagination {...paginationProps('lead', { current: pagination.current, pageSize: pagination.pageSize, total: dataOwner === identity ? pagination.total : 0,
                   pageSizeOptions, onChange: (page, size) => fetchLeads(page, size) })} />
               </div>),
             },
@@ -498,16 +498,31 @@ export function LeadsListPage() {
               label: 'Danh sách chi tiết',
               children: (
                 <div>
+                  {user?.role === 'admin' && <Space wrap className="mb-3">
+                    <span className="text-sm text-gray-500">{selectedIds.length ? `Đã chọn ${selectedIds.length} Lead` : 'Chọn tối đa 50 Lead trên trang để phân công'}</span>
+                    <Button disabled={!selectedIds.length || loading || !!loadError} onClick={() => setAssignment({
+                      leads: tableData.filter(lead => selectedIds.includes(lead.id)), bulk: true, owner: identity,
+                    })}>Phân công đã chọn</Button>
+                    {!!selectedIds.length && <Button type="text" onClick={() => setSelectedIds([])}>Bỏ chọn</Button>}
+                  </Space>}
                   <Table
                     columns={columns}
                     dataSource={tableData}
                     rowKey="id"
                     loading={loading}
+                    rowSelection={user?.role === 'admin' ? {
+                      selectedRowKeys: selectedIds,
+                      onChange: keys => {
+                        if (keys.length > 50) message.info('Mỗi lượt chọn tối đa 50 Lead.');
+                        setSelectedIds(keys.slice(0, 50).map(Number));
+                      },
+                      getCheckboxProps: lead => ({ disabled: loading || !!loadError || ['enrolled', 'lost'].includes(lead.status) }),
+                    } : undefined}
                     scroll={{ x: 1100 }}
                     pagination={paginationProps('lead', {
                       current: pagination.current,
                       pageSize: pagination.pageSize,
-                      total: pagination.total,
+                      total: dataOwner === identity ? pagination.total : 0,
                       pageSizeOptions,
                       onChange: (page, pageSize) => fetchLeads(page, pageSize),
                     })}
@@ -521,7 +536,7 @@ export function LeadsListPage() {
               children: (
                 <LeadFunnelAnalytics
                   sourceOptions={sourceOptions}
-                  data={overview}
+                  data={visibleOverview}
                   loading={loading}
                   userRole={user?.role}
                 />
@@ -565,35 +580,9 @@ export function LeadsListPage() {
         </Form>
       </Drawer>
 
-      <Modal
-        title="Phân công lead"
-        open={!!assignLead}
-        onCancel={() => {
-          setAssignLead(null);
-          setAssignSaleId(0);
-        }}
-        onOk={handleAssignLead}
-        okText="Lưu"
-        cancelText="Hủy"
-        confirmLoading={assigning}
-      >
-        <Space direction="vertical" className="w-full" size={12}>
-          <div>
-            <div className="text-gray-500">Lead</div>
-            <div className="font-medium">{assignLead?.full_name}</div>
-          </div>
-          <Select
-            className="w-full"
-            placeholder="Chọn sale phụ trách"
-            value={assignSaleId}
-            onChange={setAssignSaleId}
-            showSearch
-            optionFilterProp="label"
-            options={getLeadAssigneeOptions(sales, assignLead)}
-          />
-          {!canUnassignLead(assignLead) && <div className="text-xs text-gray-500">Lead đang được chăm sóc. Hãy chọn Sale khác để chuyển người phụ trách.</div>}
-        </Space>
-      </Modal>
+      {assignment?.owner === identity && user?.role === 'admin' && <LeadAssignmentModal
+        leads={assignment.leads} sales={sales} bulk={assignment.bulk} onClose={() => setAssignment(null)}
+        onAssigned={() => { if (identity === latestIdentity.current) refreshList(); }} />}
 
       <Drawer title="Import leads từ CSV" width={560} onClose={() => setImportVisible(false)} open={importVisible}>
         <Alert

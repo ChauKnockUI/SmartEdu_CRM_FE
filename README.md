@@ -154,6 +154,35 @@ thông báo không còn hiệu lực được đánh dấu đã đọc, hiển t
 
 ## Giao diện dùng chung
 
+Các thay đổi UX áp dụng theo luồng nghiệp vụ cho Admin, Sale, giảng viên và học
+viên; dùng chung cách trình bày, còn dữ liệu/thao tác theo quyền hiện có.
+
+Thanh đầu trang chỉ giữ thao tác hoạt động: mở menu, hướng dẫn, thông báo và tài
+khoản. Tìm kiếm dùng tại từng danh sách; ô tìm kiếm tổng chưa có xử lý được gỡ
+khỏi header. Menu tài khoản có thông tin tên/email/vai trò từ phiên đăng nhập,
+không gọi thêm API; học viên có lối vào Hồ sơ của tôi. Các nút header dùng được
+bằng bàn phím và có nhãn truy cập.
+
+Người dùng, Models và Demo Insights hiện dùng dữ liệu mẫu nên được ẩn khỏi menu
+và không còn được render qua router. Liên kết cũ hiển thị trạng thái chưa cung
+cấp, giữ nguyên kiểm tra quyền và nút Về tổng quan. Mã màn hình mẫu được giữ để
+triển khai riêng sau này; cảnh báo bỏ học đang hoạt động không thay đổi. Hướng
+dẫn bốn vai trò chỉ mô tả thao tác hiện có, không giới thiệu đổi vai trò, tự động
+hóa hay chức năng chưa triển khai.
+
+`SummaryCard` dùng chung ở dashboard, khóa học và lịch cá nhân; cùng tiêu đề theo
+công việc, ngày Việt Nam, kích thước thẻ và bố cục hai cột chỉ số trên điện thoại.
+Mỗi vai trò giữ nội dung công việc
+phù hợp, không sao chép một dashboard cho tất cả.
+
+`detailDescriptions` trong `src/shared/utils/detailLayout.ts` thống nhất thông
+tin Lead, học viên, lớp, buổi, khóa học, phòng và khoản thu: một cột trên màn
+hình nhỏ, hai cột trên desktop; ghi chú/mô tả dùng `span="filled"`.
+`PageState` dùng chung trạng thái đang tải/lỗi, nút Thử lại/Quay lại. Đọc lỗi
+không hiển thị thành không có dữ liệu; trang không được phép truy cập giải thích
+rõ thay vì tự chuyển về dashboard. Lịch cá nhân dùng trạng thái lớp từ BE và
+cùng nhãn buổi nghỉ/học bù với các màn hình quản lý.
+
 Tham chiếu bố cục trang quản trị Ant Design Pro (Table List/Analysis): nền trung
 tính, khối dữ liệu phẳng, bo góc nhỏ, ưu tiên bảng/bộ lọc/thao tác. Màu xanh dùng
 cho thao tác và điều hướng; màu trạng thái dùng cho cảnh báo nghiệp vụ. Không dùng
@@ -183,6 +212,53 @@ cụm nút chuyển trang, giữ kiểu viền của Ant Design. Danh sách lớ
 dữ liệu dùng `defaultPageSize` để đổi số dòng tại FE. Không bật đổi số dòng cho
 các mục có kích thước trang cố định. Kiểu hiển thị chung ở `.crm-pagination`.
 
+Tìm kiếm Lead, học viên, lớp, khóa học, phòng và giảng viên dùng `useSearchInput`:
+chờ 350 ms sau khi ngừng gõ, Enter tìm ngay, xóa từ khóa bỏ lọc ngay. Chỉ đặt lại
+trang khi từ khóa được áp dụng; giữ danh sách trước trong lúc chờ phản hồi mới
+và bỏ phản hồi cũ. Các danh sách nhỏ đã tải đủ (tài liệu, bộ chọn, dữ liệu tài
+chính hiện tại) vẫn lọc tại trình duyệt.
+
+`services/api/listCache.ts` lưu tạm tối đa 40 kết quả danh sách trong RAM, mỗi
+kết quả 30 giây, phân biệt URL/bộ lọc/trang và header tài khoản. Đổi trang đã xem
+hoặc tìm lại cùng điều kiện trong thời gian này không gọi lại API. Không lưu dữ
+liệu vào localStorage; đăng nhập/đăng xuất, thao tác ghi thành công qua các service
+liên quan và nút Tải lại xóa cache. Phản hồi đang chạy trước khi xóa cache không
+được ghi lại vào cache. Chi tiết, tải file, kiểm tra quyền và các API ngoài danh
+sách cho phép vẫn gọi trực tiếp. Thay đổi của người dùng khác xuất hiện ở lần
+truy vấn sau khi hết hạn hoặc bấm Tải lại, không phải cập nhật thời gian thực.
+Danh sách giảng viên dùng tổng số và phân trang của BE để không bỏ sót trang sau.
+
+Form phòng, giảng viên, khóa học và lớp dùng `shared/utils/formChanges.ts` để
+so sánh giá trị hiện tại với lúc mở và xác nhận Bỏ thay đổi/Tiếp tục sửa. Giá trị
+rỗng được thống nhất; lựa chọn nhiều mục so sánh theo tập giá trị, ngày/giờ của
+lớp so sánh theo định dạng được lưu. Sửa rồi hoàn tác không hỏi xác nhận. Form
+khóa học dùng chung ở danh sách và chi tiết; tài liệu dùng cùng thông báo xác
+nhận, file mới vẫn được tính là thay đổi.
+
+Khóa gửi được đặt trước khi kiểm tra form để chặn bấm Lưu liên tiếp. Trong lúc
+lưu, khóa dữ liệu, Hủy, dấu X, Escape và đóng bằng nền. Lỗi nhập liệu hiển thị tại
+trường; lỗi API giữ nguyên form và thông báo từ BE. Chỉ thành công mới đóng và
+làm mới dữ liệu. Không thay đổi quyền, API hay DB; không thêm cơ chế chặn chuyển
+trang hoặc khung biểu mẫu riêng.
+
+Phòng, khóa học, giảng viên và ba màn tài chính dùng `useListLocation` để giữ
+`search`, `status`, `page`, `page_size` trên URL; phòng giữ thêm `min_capacity`,
+thu học phí giữ `tab` và không làm mất `invoice_id` của liên kết chi tiết. Đổi
+bộ lọc về trang đầu; Back/quay lại từ chi tiết hoặc tải lại trang giữ trạng thái.
+Tài chính lọc trên danh sách đã tải, không gọi API khi gõ hoặc chuyển trang.
+
+`EnrollmentStudentSelect` dùng chung ở chi tiết lớp và Xếp lớp: chỉ tìm khi mở
+hộp ghi danh, 20 học viên mỗi trang, chờ 350 ms sau khi gõ, giữ tên và ID đã chọn
+khi tìm/chuyển trang. `exclude_class_id` loại ghi danh đang học/hoàn thành tại BE
+trước khi tính tổng; học viên đã nghỉ và hồ sơ còn hoạt động vẫn có thể ghi danh
+lại. Xếp lớp tìm lớp qua API 20 lớp/trang, giữ lớp đang chọn; kiểm tra trùng lịch
+chỉ cho nhóm kết quả và học viên đã chọn, không tải toàn bộ học viên lên FE.
+
+Chi tiết buổi học có thông tin tóm tắt và ba tab: điểm danh/nội dung, tài liệu,
+nghỉ/học bù. Học viên ưu tiên tài liệu; các liên kết có `material_scope` vẫn mở
+đúng tab/phạm vi. Bộ lọc điểm danh thay bảng vắng/muộn bị lặp; thống kê không đổi.
+Khi đang sửa điểm danh hoặc thay lịch, khóa chuyển tab để giữ thao tác đang làm.
+
 Bố cục theo công việc: Lead/học viên/thu phí dùng bảng để đối chiếu; lớp học dùng
 thẻ để nhận biết lớp, lịch và sĩ số; thời khóa biểu dùng lịch; dashboard dùng chỉ
 số, biểu đồ và cảnh báo. Giữ cùng màu, phông chữ và khoảng cách giữa các cách trình
@@ -209,6 +285,27 @@ Học viên chỉ có nút tải về; quyền quản lý dựa vào phản hồ
 
 Cần triển khai BE và migration `20261122120000_materials_by_session` trước FE.
 FE không giữ khóa Supabase hoặc lưu signed URL vào DB/localStorage.
+
+Dashboard giảng viên có bốn chỉ số, lịch dạy lọc Hôm nay/7 ngày, một khối Cảnh báo
+và hàng tài liệu gần đây. Học viên cần hỗ trợ nằm trong Cảnh báo, bấm Xem mở
+Drawer từ dữ liệu tổng quan đã tải, có liên kết xem toàn bộ trường hợp. Đổi bộ
+lọc/phân trang lịch không gọi thêm API. Tài liệu có tên lớp, phạm vi và nút tải trực tiếp;
+liên kết mở đúng lớp/buổi và bộ lọc `material_scope`. Tải file dùng link mới,
+kiểm tra phản hồi rồi tải bằng Blob để lỗi không điều hướng người dùng khỏi CRM.
+Bảng tài liệu trên điện thoại gộp phạm vi dưới tên file; menu ⋮ chứa chỉnh sửa/xóa.
+Đóng hộp tài liệu có thay đổi chưa lưu sẽ hỏi xác nhận. Không thêm migration.
+
+## Nhóm chăm sóc và phân công Lead
+
+Nhóm chăm sóc Lead dùng tham số URL `care=unassigned|never_contacted|follow_up`;
+liên kết `needs_care=true` cũ vẫn hoạt động. Các nhóm chỉ tính Lead đang mở;
+`follow_up` là đã liên hệ nhưng quá 3 ngày chưa liên hệ lại. Bảng, phễu và báo cáo
+dùng cùng bộ lọc. Thời gian hiển thị dựa trên ngày tạo hoặc lần liên hệ gần nhất.
+
+Admin có thể chọn tối đa 50 Lead đang mở trên trang danh sách để phân công.
+Phân công đơn và hàng loạt dùng chung hộp thoại, gọi API cập nhật hiện có theo
+nhóm tối đa 5 yêu cầu; giữ riêng Lead lỗi để thử lại. Đổi bộ lọc/trang hoặc tải lại
+sẽ bỏ lựa chọn. Sale không có thao tác phân công. Không thêm migration.
 
 ## 📄 License
 

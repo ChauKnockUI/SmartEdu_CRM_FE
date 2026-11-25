@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, Spin, message, type MenuProps } from 'antd';
+import { Avatar, Badge, Button, Descriptions, Dropdown, Empty, Layout, Menu, Modal, Spin, message, type MenuProps } from 'antd';
 import {
   BellOutlined,
   BookOutlined,
@@ -14,8 +14,6 @@ import {
   QuestionCircleOutlined,
   ReadOutlined,
   RobotOutlined,
-  SearchOutlined,
-  SettingOutlined,
   SwapOutlined,
   TeamOutlined,
   UserOutlined,
@@ -36,6 +34,7 @@ dayjs.extend(relativeTime);
 dayjs.locale('vi');
 
 const { Header, Sider, Content } = Layout;
+const roleLabels = { admin: 'Quản trị viên', sale: 'Sale', teacher: 'Giảng viên', student: 'Học viên' };
 type MenuItem = Required<MenuProps>['items'][number];
 
 type MarkTarget = number | 'all';
@@ -78,9 +77,9 @@ function leafMenuKeys(items: MenuItem[]): string[] {
 export function getMenuItemsForRole(role: UserRole): MenuItem[] {
   if (role === 'sale') {
     return [
-      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
+      getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
       getItem('CRM', '/crm', <CustomerServiceOutlined />, [
-        getItem('Quản lý leads', '/crm/leads', <UserOutlined />),
+        getItem('Quản lý lead', '/crm/leads', <UserOutlined />),
         getItem('Học viên phụ trách', '/lms/students', <TeamOutlined />),
       ]),
       getItem('Tài chính', '/finance', <DollarOutlined />, [
@@ -93,8 +92,8 @@ export function getMenuItemsForRole(role: UserRole): MenuItem[] {
 
   if (role === 'teacher') {
     return [
-      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-      getItem('LMS', '/lms', <BookOutlined />, [
+      getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
+      getItem('Đào tạo', '/lms', <BookOutlined />, [
         getItem('Lịch dạy', '/lms/myschedule', <CalendarOutlined />),
         getItem('Lớp học', '/lms/classes', <BookOutlined />),
         getItem('Học viên trong lớp', '/lms/students', <TeamOutlined />),
@@ -105,8 +104,8 @@ export function getMenuItemsForRole(role: UserRole): MenuItem[] {
 
   if (role === 'student') {
     return [
-      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-      getItem('LMS', '/lms', <BookOutlined />, [
+      getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
+      getItem('Đào tạo', '/lms', <BookOutlined />, [
         getItem('Lịch học của tôi', '/lms/myschedule', <CalendarOutlined />),
         getItem('Lớp học của tôi', '/lms/classes', <BookOutlined />),
         getItem('Hồ sơ của tôi', '/lms/my-profile', <UserOutlined />),
@@ -115,11 +114,11 @@ export function getMenuItemsForRole(role: UserRole): MenuItem[] {
   }
 
   return [
-    getItem('Dashboard', '/dashboard', <DashboardOutlined />),
+    getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
     getItem('CRM', '/crm', <CustomerServiceOutlined />, [
-      getItem('Quản lý leads', '/crm/leads', <UserOutlined />),
+      getItem('Quản lý lead', '/crm/leads', <UserOutlined />),
     ]),
-    getItem('LMS', '/lms', <BookOutlined />, [
+    getItem('Đào tạo', '/lms', <BookOutlined />, [
       getItem('Học viên', '/lms/students', <TeamOutlined />),
       getItem('Giảng viên', '/lms/teachers', <ReadOutlined />),
       getItem('Khóa học', '/lms/courses', <ReadOutlined />),
@@ -133,14 +132,7 @@ export function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
       getItem('Công nợ', '/finance/debts', <DollarOutlined />),
     ]),
-    getItem('AI & Insights', '/ai', <RobotOutlined />, [
-      getItem('Models', '/ai/models', <RobotOutlined />),
-      getItem('Cảnh báo bỏ học', '/ai/predictions', <DashboardOutlined />),
-      getItem('Demo Insights', '/ai/insights', <DashboardOutlined />),
-    ]),
-    getItem('Cài đặt', '/settings', <SettingOutlined />, [
-      getItem('Người dùng', '/settings/users', <TeamOutlined />),
-    ]),
+    getItem('Cảnh báo bỏ học', '/ai/predictions', <RobotOutlined />),
   ];
 }
 
@@ -154,6 +146,7 @@ export function AdminLayout() {
     return () => window.removeEventListener('keydown', close);
   }, [mobile, collapsed]);
   const [guideVisible, setGuideVisible] = useState(false);
+  const [accountVisible, setAccountVisible] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { user, token, logout } = useAuth();
@@ -173,9 +166,9 @@ export function AdminLayout() {
   };
 
   const userMenuItems: MenuProps['items'] = [
-    { key: 'profile', icon: <UserOutlined />, label: 'Thông tin tài khoản',
-      ...(user?.role === 'student' ? { onClick: () => navigate('/lms/my-profile') } : {}) },
-    { key: 'settings', icon: <SettingOutlined />, label: 'Cài đặt' },
+    { key: 'account', icon: <UserOutlined />, label: 'Thông tin tài khoản', onClick: () => setAccountVisible(true) },
+    ...(user?.role === 'student' ? [{ key: 'profile', icon: <ReadOutlined />, label: 'Hồ sơ của tôi',
+      onClick: () => navigate('/lms/my-profile') }] : []),
     { key: 'divider-1', type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true, onClick: handleLogout },
   ];
@@ -365,12 +358,6 @@ export function AdminLayout() {
               aria-label={collapsed ? 'Mở menu điều hướng' : 'Thu gọn menu điều hướng'}
               style={{ fontSize: 16 }}
             />
-            <Input
-              placeholder="Tìm lead, học viên, lớp học..."
-              prefix={<SearchOutlined />}
-              style={{ width: 320 }}
-              className="hidden md:flex"
-            />
           </div>
 
           <div className="flex items-center gap-3">
@@ -379,6 +366,7 @@ export function AdminLayout() {
               icon={<QuestionCircleOutlined style={{ fontSize: 18 }} />}
               onClick={() => setGuideVisible(true)}
               title="Hướng dẫn sử dụng"
+              aria-label="Hướng dẫn sử dụng"
             />
             <Dropdown
               open={notifOpen}
@@ -472,17 +460,17 @@ export function AdminLayout() {
               )}
             >
               <Badge count={unreadCount} overflowCount={99}>
-                <Button type="text" icon={<BellOutlined style={{ fontSize: 18 }} />} />
+                <Button type="text" aria-label="Mở thông báo" icon={<BellOutlined style={{ fontSize: 18 }} />} />
               </Badge>
             </Dropdown>
             <Dropdown menu={{ items: userMenuItems }} trigger={['click']} placement="bottomRight">
-              <div className="flex cursor-pointer items-center gap-2">
+              <Button type="text" aria-label="Mở menu tài khoản" className="h-auto py-1">
                 <Avatar>{user?.name?.[0] || 'U'}</Avatar>
-                <div className="hidden md:block">
-                  <div className="font-medium leading-5">{user?.name || 'User'}</div>
-                  <div className="text-xs text-gray-500 capitalize">{user?.role || 'guest'}</div>
-                </div>
-              </div>
+                <span className="hidden md:block text-left max-w-48">
+                  <span className="block font-medium leading-5 truncate">{user?.name || 'Tài khoản'}</span>
+                  <span className="block text-xs text-gray-500">{user?.role ? roleLabels[user.role] : 'Tài khoản'}</span>
+                </span>
+              </Button>
             </Dropdown>
           </div>
         </Header>
@@ -493,6 +481,14 @@ export function AdminLayout() {
       </Layout>
 
       <RoleGuide visible={guideVisible} onClose={() => setGuideVisible(false)} role={user?.role || 'admin'} />
+      <Modal title="Thông tin tài khoản" open={accountVisible && !!user} onCancel={() => setAccountVisible(false)}
+        footer={<Button onClick={() => setAccountVisible(false)}>Đóng</Button>} width={480}>
+        <Descriptions bordered column={1} size="small" className="crm-detail-descriptions">
+          <Descriptions.Item label="Họ và tên">{user?.name || 'Chưa có thông tin'}</Descriptions.Item>
+          <Descriptions.Item label="Email">{user?.email || 'Chưa có thông tin'}</Descriptions.Item>
+          <Descriptions.Item label="Vai trò">{user?.role ? roleLabels[user.role] : 'Chưa có thông tin'}</Descriptions.Item>
+        </Descriptions>
+      </Modal>
     </Layout>
   );
 }

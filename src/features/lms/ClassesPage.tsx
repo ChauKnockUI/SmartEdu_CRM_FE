@@ -31,6 +31,9 @@ import { useSearchParams } from 'react-router';
 import { classService, type ClassFilterOptions } from '@/services/api/class.service';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { useSearchInput } from '../../shared/hooks/useSearchInput';
+import { clearListCache } from '../../services/api/listCache';
+import { confirmDiscardChanges, formSnapshot } from '../../shared/utils/formChanges';
 import { CLASS_STATUSES, getClassStatus, classPageSizes, readClassLocation, writeClassLocation, classQueryParams, type ClassListView } from './classFilters';
 import { courseSchedulePreview } from './courseSchedule';
 
@@ -63,9 +66,12 @@ export function ClassesPage() {
   const { openDetail } = useDetailNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const view = useMemo(() => readClassLocation(searchParams), [searchParams]);
-  const [searchDraft, setSearchDraft] = useState(view.search);
+  const { searchDraft, setSearchDraft, submitSearch } = useSearchInput(view.search, search => updateView({ search }));
   const { user } = useAuth();
   const role = user?.role;
+  const identity = `${user?.id}:${role}`;
+  const [dataOwner, setDataOwner] = useState('');
+  const latestIdentity = useRef(identity); latestIdentity.current = identity;
 
   const isAdmin = role === 'admin';
   const isTeacher = role === 'teacher';
@@ -80,11 +86,25 @@ export function ClassesPage() {
 
   const [open, setOpen] = useState(false);
   const [form] = Form.useForm();
+  const original = useRef('');
+  const alive = useRef(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const snapshot = () => {
+    const values = form.getFieldsValue(true);
+    return formSnapshot({ ...values, start_date: values.start_date?.format('YYYY-MM-DD'),
+      end_date: values.end_date?.format('YYYY-MM-DD'),
+      schedule_time: values.schedule_time?.map((time: dayjs.Dayjs | null) => time?.format('HH:mm')) }, ['schedule_days']);
+  };
   const [options, setOptions] = useState<ClassFilterOptions>({ courses: [], teachers: [] });
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [optionsError, setOptionsError] = useState('');
   const [creating, setCreating] = useState(false);
   const createBusy = useRef(false);
+  const closeModal = () => {
+    if (!createBusy.current) confirmDiscardChanges(snapshot() !== original.current, () => {
+      if (alive.current && identity === latestIdentity.current && !createBusy.current) setOpen(false);
+    });
+  };
   const courses = options.courses;
   const createCourses = courses.filter(course => course.is_active !== false);
   const selectedCourseId = Form.useWatch('course_id', form);
@@ -108,7 +128,7 @@ export function ClassesPage() {
       setLoading(true);
       setLoadError('');
       const res = await classService.getAll(classQueryParams(view));
-      if (request !== listRequest.current) return;
+      if (request !== listRequest.current || identity !== latestIdentity.current) return;
       const count = res.pagination?.total || 0;
       const lastPage = Math.max(1, Math.ceil(count / view.pageSize));
       if (view.page > lastPage) {
@@ -118,13 +138,15 @@ export function ClassesPage() {
       }
       setClasses(res.data || []);
       setTotal(count);
+      setDataOwner(identity);
     } catch (err: any) {
-      if (request === listRequest.current) {
+      if (request === listRequest.current && identity === latestIdentity.current) {
         setClasses([]); setTotal(0);
+        setDataOwner(identity);
         setLoadError(err.message || 'Không tải được danh sách lớp học');
       }
     } finally {
-      if (request === listRequest.current && !changingPage) setLoading(false);
+      if (request === listRequest.current && identity === latestIdentity.current && !changingPage) setLoading(false);
     }
   };
 
@@ -149,7 +171,6 @@ export function ClassesPage() {
     setOptions({ courses: [], teachers: [] }); fetchOptions();
     return () => { optionsRequest.current++; };
   }, [user?.id, role]);
-  useEffect(() => { setSearchDraft(view.search); }, [view.search]);
   useEffect(() => {
     if (open && autoEnd) form.setFieldValue('end_date', schedulePreview ? dayjs(schedulePreview.endDate) : undefined);
   }, [open, autoEnd, schedulePreview, form]);
@@ -157,7 +178,8 @@ export function ClassesPage() {
     if (!isAdmin || searchParams.get('create') !== '1' || optionsLoading || optionsError || !courses.length) return;
     const course = createCourses.find(item => item.id === view.courseId);
     if (course) {
-      form.resetFields(); form.setFieldsValue({ course_id: course.id }); setOpen(true);
+      form.resetFields(); form.setFieldsValue({ course_id: course.id });
+      original.current = snapshot(); setOpen(true);
     } else message.warning('Khóa học đã tạm dừng hoặc không còn tồn tại. Vui lòng chọn khóa học đang mở.');
     const next = new URLSearchParams(searchParams); next.delete('create'); setSearchParams(next, { replace: true });
   }, [searchParams, optionsLoading, optionsError, courses, isAdmin]);
@@ -203,10 +225,11 @@ export function ClassesPage() {
     dateStr ? dayjs(dateStr).format('DD/MM/YYYY') : '–';
 
   const handleCreate = async () => {
-    if (createBusy.current) return;
+    if (!isAdmin || createBusy.current) return;
     createBusy.current = true; setCreating(true);
     try {
       const v = await form.validateFields();
+      if (!alive.current || identity !== latestIdentity.current) return;
       await classService.create({
         name: v.name,
         course_id: v.course_id,
@@ -220,6 +243,7 @@ export function ClassesPage() {
         max_students: v.max_students,
       });
 
+      if (!alive.current || identity !== latestIdentity.current) return;
       message.success(hasFilters ? 'Tạo lớp thành công. Danh sách vẫn áp dụng bộ lọc đã chọn.' : 'Tạo lớp thành công');
       setOpen(false);
       form.resetFields();
@@ -227,9 +251,9 @@ export function ClassesPage() {
       if (view.page !== 1) updateView({ page: 1 }, false);
       else fetchClasses();
     } catch (err: any) {
-      if (!err.errorFields) { message.error(err.message || 'Tạo thất bại'); fetchOptions(); }
+      if (alive.current && identity === latestIdentity.current && !err.errorFields) { message.error(err.message || 'Tạo thất bại'); fetchOptions(); }
     } finally {
-      createBusy.current = false; setCreating(false);
+      createBusy.current = false; if (alive.current) setCreating(false);
     }
   };
 
@@ -258,15 +282,15 @@ export function ClassesPage() {
       <PageHeader
         title={pageTitle}
         actions={<Space wrap>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => { fetchClasses(); fetchOptions(); }}>Tải lại</Button>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => { clearListCache(); fetchClasses(); fetchOptions(); }}>Tải lại</Button>
           {isAdmin && (
             <Button
               type="primary"
               icon={<PlusOutlined />}
               disabled={optionsLoading || !!optionsError || !createCourses.length}
-              onClick={() => { form.resetFields(); form.setFieldsValue({
+              onClick={() => { if (createBusy.current) return; form.resetFields(); form.setFieldsValue({
                 course_id: createCourses.some(course => course.id === view.courseId) ? view.courseId : undefined,
-              }); setOpen(true); }}
+              }); original.current = snapshot(); setOpen(true); }}
             >
               Tạo lớp học
             </Button>
@@ -278,7 +302,7 @@ export function ClassesPage() {
         <Space wrap size={[12, 12]} className="crm-filter-controls mb-4">
           <Input.Search aria-label="Tìm theo tên lớp" placeholder="Tìm theo tên lớp" allowClear maxLength={200}
             value={searchDraft} className="crm-filter-search" onChange={event => setSearchDraft(event.target.value)}
-            onSearch={value => updateView({ search: value.trim() })} />
+            onSearch={submitSearch} />
           <Select aria-label="Lọc theo khóa học" placeholder="Khóa học" allowClear showSearch optionFilterProp="label"
             className="crm-filter-select" value={view.courseId} options={courseOptions} loading={optionsLoading}
             onChange={courseId => updateView({ courseId })} />
@@ -301,7 +325,7 @@ export function ClassesPage() {
 
         {!loadError && <>
           <Spin spinning={loading}>
-            {classes.length ? <Row className="crm-class-grid" gutter={[16, 16]}>
+            {dataOwner === identity && classes.length ? <Row className="crm-class-grid" gutter={[16, 16]}>
               {classes.map(cls => {
                 const status = getClassStatus(cls.status);
                 return <Col xs={24} md={12} xl={8} key={cls.id}>
@@ -332,7 +356,7 @@ export function ClassesPage() {
                 : 'Chưa có lớp học trong phạm vi phụ trách'} />}
           </Spin>
           <Pagination {...paginationProps('lớp', {
-            current: view.page, pageSize: view.pageSize, total, pageSizeOptions: classPageSizes, disabled: loading,
+            current: view.page, pageSize: view.pageSize, total: dataOwner === identity ? total : 0, pageSizeOptions: classPageSizes, disabled: loading,
             onChange: (page, pageSize) => updateView({ page: pageSize === view.pageSize ? page : 1, pageSize }, false),
           })} />
         </>}
@@ -340,12 +364,12 @@ export function ClassesPage() {
 
       <Modal
         title="Tạo lớp học"
-        open={open}
+        open={isAdmin && open} forceRender={isAdmin}
         onOk={handleCreate}
         confirmLoading={creating}
         okButtonProps={{ disabled: optionsLoading || (autoEnd && !schedulePreview) }}
         cancelButtonProps={{ disabled: creating }} closable={!creating} maskClosable={!creating} keyboard={!creating}
-        onCancel={() => { if (!createBusy.current) setOpen(false); }}
+        onCancel={closeModal} okText="Lưu" cancelText="Hủy"
       >
         <Form form={form} disabled={creating} layout="vertical">
           <Form.Item name="name" label="Tên lớp" rules={[{ required: true }]}>

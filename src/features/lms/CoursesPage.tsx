@@ -4,13 +4,17 @@ import {
     Alert, Card, Table, Button, Tag, Space,
     Input, Select, Modal, Form, InputNumber, message, Popconfirm,
 } from 'antd';
-import { EditOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router';
+import { EditOutlined, EyeOutlined, ReloadOutlined } from '@ant-design/icons';
+import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
+import { useListLocation } from '../../shared/hooks/useListLocation';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { courseService, type Course, type CourseInput } from '@/services/api/course.service';
 import { usePermissions } from '../../shared/hooks/usePermissions';
 import { useAuth } from '../../shared/contexts/AuthContext';
+import { useSearchInput } from '../../shared/hooks/useSearchInput';
+import { clearListCache } from '../../services/api/listCache';
+import { confirmDiscardChanges, formSnapshot } from '../../shared/utils/formChanges';
 
 type CourseFormValues = Omit<CourseInput, 'is_active'> & { is_active: 'active' | 'inactive' };
 
@@ -24,6 +28,12 @@ export function CourseFormModal({ course, onCancel, onSaved }: {
     const [saving, setSaving] = useState(false);
     const submitLock = useRef(false);
     const mounted = useRef(false);
+    const initialValues: Partial<CourseFormValues> = course ? {
+        name: course.name, description: course.description ?? undefined,
+        total_sessions: course.total_sessions, duration_weeks: course.duration_weeks,
+        fee: Number(course.fee), is_active: course.is_active ? 'active' : 'inactive',
+    } : { is_active: 'active' };
+    const original = useRef(formSnapshot(initialValues));
 
     useEffect(() => {
         mounted.current = true;
@@ -66,7 +76,11 @@ export function CourseFormModal({ course, onCancel, onSaved }: {
             title={course ? 'Chỉnh sửa khóa học' : 'Tạo khóa học'}
             open
             onOk={handleSave}
-            onCancel={() => { if (!submitLock.current) onCancel(); }}
+            onCancel={() => { if (!submitLock.current) confirmDiscardChanges(
+                formSnapshot(form.getFieldsValue(true)) !== original.current,
+                () => { if (mounted.current && !submitLock.current) onCancel(); }
+            ); }}
+            okText="Lưu" cancelText="Hủy"
             confirmLoading={saving}
             cancelButtonProps={{ disabled: saving }}
             closable={!saving}
@@ -78,14 +92,7 @@ export function CourseFormModal({ course, onCancel, onSaved }: {
                 layout="vertical"
                 disabled={saving}
                 onFinish={handleSave}
-                initialValues={course ? {
-                    name: course.name,
-                    description: course.description,
-                    total_sessions: course.total_sessions,
-                    duration_weeks: course.duration_weeks,
-                    fee: Number(course.fee),
-                    is_active: course.is_active ? 'active' : 'inactive',
-                } : { is_active: 'active' }}
+                initialValues={initialValues}
             >
                 <Form.Item name="name" label="Tên khóa học" rules={[{ required: true, whitespace: true, message: 'Nhập tên khóa học' }]}>
                     <Input maxLength={255} />
@@ -124,7 +131,8 @@ export function CourseFormModal({ course, onCancel, onSaved }: {
 
 export function CoursesPage() {
     const { user } = useAuth();
-    const navigate = useNavigate();
+    const { openDetail } = useDetailNavigation();
+    const { params, page, pageSize, setPage, choice, update } = useListLocation({ status: 'all' });
     const { can } = usePermissions();
     const canCreate = can('courses', 'write');
     const canEdit = can('courses', 'write');
@@ -139,9 +147,15 @@ export function CoursesPage() {
     const [deletingId, setDeletingId] = useState<number | null>(null);
     const mounted = useRef(false);
 
-    const [searchText, setSearchText] = useState('');
-    const [statusFilter, setStatusFilter] = useState('all');
-    const [pagination, setPagination] = useState({ page: 1, limit: 10 });
+    const searchText = (params.get('search') || '').slice(0, 200);
+    const statusFilter = choice('status', ['all', 'active', 'inactive']);
+    const pagination = { page, limit: pageSize };
+    const { searchDraft, setSearchDraft, submitSearch } = useSearchInput(searchText, search => {
+        update({ search }, true, true);
+    });
+    const identity = `${user?.id}:${user?.role}`;
+    const [dataOwner, setDataOwner] = useState('');
+    const refresh = () => { clearListCache(); setReload(value => value + 1); };
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingCourse, setEditingCourse] = useState<Course | null>(null);
 
@@ -156,7 +170,6 @@ export function CoursesPage() {
         const fetchCourses = async () => {
             setLoading(true);
             setLoadError('');
-            setCourses([]);
             try {
                 const res = await courseService.getAll(
                     pagination.page, pagination.limit, searchText.trim(),
@@ -165,14 +178,17 @@ export function CoursesPage() {
                 if (request !== listRequest.current) return;
                 const lastPage = Math.max(1, Math.ceil(res.pagination.total / pagination.limit));
                 if (pagination.page > lastPage) {
-                    setPagination(current => ({ ...current, page: lastPage }));
+                    setPage(lastPage);
                     return;
                 }
                 setCourses(res.data);
                 setTotal(res.pagination.total);
+                setDataOwner(identity);
             } catch (err) {
                 if (request !== listRequest.current) return;
                 setTotal(0);
+                setCourses([]);
+                setDataOwner(identity);
                 setLoadError(err instanceof Error ? err.message : 'Lỗi tải danh sách khóa học');
             } finally {
                 if (request === listRequest.current) setLoading(false);
@@ -237,7 +253,7 @@ export function CoursesPage() {
             title: 'Thao tác',
             render: (_, record) => (
                 <Space>
-                    <Button onClick={() => navigate(`/lms/courses/${record.id}`)}>
+                    <Button onClick={() => openDetail(`/lms/courses/${record.id}`)}>
                         <EyeOutlined />
                     </Button>
                     {canEdit && (
@@ -268,23 +284,18 @@ export function CoursesPage() {
       <PageHeader
                 title="Quản lý Khóa học"
                 description="Danh sách các khóa học"
-                actions={canCreate && <Button type="primary" onClick={handleCreate}>Tạo khóa học</Button>}
+                actions={<><Button icon={<ReloadOutlined />} loading={loading} onClick={refresh}>Tải lại</Button>
+                    {canCreate && <Button type="primary" onClick={handleCreate}>Tạo khóa học</Button>}</>}
             />
             <Card>
-                <div className="mb-4 flex gap-4">
-                    <Input
-                        placeholder="Tìm kiếm..."
-                        value={searchText}
-                        onChange={(e) => {
-                            setSearchText(e.target.value);
-                            setPagination(current => ({ ...current, page: 1 }));
-                        }}
-                        prefix={<SearchOutlined />}
-                        style={{ width: 300 }}
+                <div className="crm-filter-controls mb-4">
+                    <Input.Search
+                        aria-label="Tìm khóa học" placeholder="Tìm tên khóa học" allowClear
+                        value={searchDraft} onChange={e => setSearchDraft(e.target.value)} onSearch={submitSearch}
+                        className="crm-filter-search"
                     />
-                    <Select value={statusFilter} onChange={(value) => {
-                        setStatusFilter(value);
-                        setPagination(current => ({ ...current, page: 1 }));
+                    <Select className="crm-filter-status" aria-label="Trạng thái khóa học" value={statusFilter} onChange={(value) => {
+                        update({ status: value });
                     }}>
                         <Select.Option value="all">Tất cả</Select.Option>
                         <Select.Option value="active">Đang mở</Select.Option>
@@ -297,21 +308,20 @@ export function CoursesPage() {
                         showIcon
                         title={loadError}
                         className="mb-4"
-                        action={<Button onClick={() => setReload(value => value + 1)}>Thử lại</Button>}
+                        action={<Button onClick={refresh}>Thử lại</Button>}
                     />
                 )}
                 <Table
                     columns={columns}
-                    dataSource={courses}
+                    dataSource={dataOwner === identity ? courses : []}
                     rowKey="id"
                     loading={loading}
+                    scroll={{ x: 900 }}
                     pagination={paginationProps('khóa học', {
                         current: pagination.page,
                         pageSize: pagination.limit,
-                        total,
-                        onChange: (page, limit) => setPagination({
-                            page: limit === pagination.limit ? page : 1, limit,
-                        }),
+                        total: dataOwner === identity ? total : 0,
+                        onChange: (page, limit) => setPage(limit === pagination.limit ? page : 1, limit),
                     })}
                 />
             </Card>

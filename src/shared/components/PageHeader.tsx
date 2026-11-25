@@ -22,8 +22,11 @@ export function PageHeader({ title, breadcrumbs, description, actions, back }: P
     <header className="crm-page-header">
       <div className="crm-page-header-copy">
         {breadcrumbs && breadcrumbs.length > 0 && (
-          <Breadcrumb items={breadcrumbs} className="mb-2" itemRender={item => item.href
-            ? <Link to={item.href}>{item.title}</Link> : item.title} />
+          <Breadcrumb items={breadcrumbs} className="mb-2" itemRender={item => {
+            const label = item.href === '/dashboard' || item.title === 'Dashboard' ? 'Tổng quan'
+              : item.title === 'LMS' ? 'Đào tạo' : item.title;
+            return item.href ? <Link to={item.href}>{label}</Link> : label;
+          }} />
         )}
         <div className="crm-page-heading">
           {showBack && <Button type="text" icon={<ArrowLeftOutlined />} onClick={goBack} aria-label="Quay lại trang trước" title="Quay lại trang trước">{!title ? 'Quay lại' : null}</Button>}

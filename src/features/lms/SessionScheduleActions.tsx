@@ -118,7 +118,8 @@ export function SessionScheduleActions({ scheduleId, role, scheduleChange, start
   };
 
   const actionAllowed = action === 'cancel' ? canCancel : canMakeup;
-  if (!canCancel && !canMakeup && !scheduleChange?.pendingMakeup && !scheduleChange?.history?.length) return null;
+  if (!canCancel && !canMakeup && !scheduleChange?.pendingMakeup && !scheduleChange?.history?.length)
+    return <Card size="small"><Typography.Text type="secondary">Chưa có thay đổi lịch học.</Typography.Text></Card>;
 
   return (
     <Card title="Thay đổi lịch học" extra={canManage && <Space wrap>

@@ -1,3 +1,4 @@
+import { useListLocation } from '../../shared/hooks/useListLocation';
 import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Table, Tag, message, Alert, Typography } from 'antd';
@@ -12,7 +13,7 @@ import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
 
 export function InvoicesPage() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const [detailId, setDetailId] = useState<number | null>(null);
@@ -27,8 +28,9 @@ export function InvoicesPage() {
   const [classesError, setClassesError] = useState('');
   const [template, setTemplate] = useState<any | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
-  const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('active');
+  const { params, page, pageSize, setPage, choice, update } = useListLocation({ status: 'active' });
+  const query = (params.get('search') || '').slice(0, 200);
+  const statusFilter = choice('status', ['active', 'all', 'overdue', 'partial', 'pending', 'paid', 'cancelled', 'refunded']);
   const [form] = Form.useForm();
   const extraEnabled = Form.useWatch('extra_item_enabled', form);
   const extraAmount = Form.useWatch('extra_item_amount', form);
@@ -110,6 +112,11 @@ export function InvoicesPage() {
       if (priority !== 0) return priority;
       return new Date(a.due_date || '2999-01-01').getTime() - new Date(b.due_date || '2999-01-01').getTime();
     }), [invoices, query, statusFilter]);
+
+  useEffect(() => {
+    const last = Math.max(1, Math.ceil(rows.length / pageSize));
+    if (!loading && !loadError && page > last) setPage(last);
+  }, [rows.length, page, pageSize, loading, loadError]);
 
   const summary = useMemo(() => {
     const active = invoices.filter(isCollectibleInvoice);
@@ -254,12 +261,12 @@ export function InvoicesPage() {
             aria-label="Tìm theo học viên, số điện thoại, email, lớp hoặc mã khoản thu"
             placeholder="Học viên, SĐT, email, lớp, mã thu"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={event => update({ search: event.target.value }, true, true)}
             className="crm-filter-search"
           />
           <Select
             value={statusFilter}
-            onChange={setStatusFilter}
+            onChange={status => update({ status })}
             className="crm-filter-status"
             options={[
               { label: 'Đang phải thu', value: 'active' },
@@ -281,7 +288,7 @@ export function InvoicesPage() {
           dataSource={rows}
           locale={{ emptyText: loadError ? 'Chưa tải được khoản phải thu' : 'Không có khoản phải thu phù hợp' }}
           scroll={{ x: 1120 }}
-          pagination={paginationProps('khoản phải thu', { defaultPageSize: 10 })}
+          pagination={paginationProps('khoản phải thu', { current: page, pageSize, onChange: (next, size) => setPage(size === pageSize ? next : 1, size) })}
         />
       </Card>
 

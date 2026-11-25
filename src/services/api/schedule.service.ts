@@ -1,3 +1,4 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 
 export interface ScheduleChange {
@@ -33,7 +34,7 @@ const getAuthHeader = () => ({
 
 export const scheduleService = {
   cancel: async (id: number, payload: { reason: string }, signal?: AbortSignal) => {
-    const res = await fetch(`${config.baseURL}/schedules/${id}/cancel`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}/cancel`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify(payload),
@@ -45,7 +46,7 @@ export const scheduleService = {
   },
 
   makeup: async (id: number, payload: MakeupSchedulePayload, signal?: AbortSignal) => {
-    const res = await fetch(`${config.baseURL}/schedules/${id}/makeup`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}/makeup`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify(payload),
@@ -75,7 +76,7 @@ export const scheduleService = {
     const queryString = query.toString();
     const url = queryString ? `${config.baseURL}/schedules?${queryString}` : `${config.baseURL}/schedules`;
 
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       headers: getAuthHeader(),
     });
 
@@ -86,7 +87,7 @@ export const scheduleService = {
   },
 
   getMySchedules: async () => {
-    const res = await fetch(`${config.baseURL}/schedules/my/schedules`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/my/schedules`, {
       headers: getAuthHeader(),
     });
 
@@ -97,7 +98,7 @@ export const scheduleService = {
   },
 
   getByClass: async (classId: number) => {
-    const res = await fetch(`${config.baseURL}/schedules/class/${classId}`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/class/${classId}`, {
       headers: getAuthHeader(),
     });
 
@@ -108,7 +109,7 @@ export const scheduleService = {
   },
 
   create: async (data: any) => {
-    const res = await fetch(`${config.baseURL}/schedules`, {
+    const res = await apiFetch(`${config.baseURL}/schedules`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -121,7 +122,7 @@ export const scheduleService = {
   },
 
   update: async (id: number, data: any) => {
-    const res = await fetch(`${config.baseURL}/schedules/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}`, {
       method: 'PUT',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -134,7 +135,7 @@ export const scheduleService = {
   },
 
   remove: async (id: number) => {
-    const res = await fetch(`${config.baseURL}/schedules/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}`, {
       method: 'DELETE',
       headers: getAuthHeader(),
     });
@@ -146,7 +147,7 @@ export const scheduleService = {
   },
 
   remindAttendance: async (scheduleId: number) => {
-    const res = await fetch(`${config.baseURL}/schedules/${scheduleId}/remind-attendance`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${scheduleId}/remind-attendance`, {
       method: 'POST',
       headers: getAuthHeader(),
     });
@@ -158,7 +159,7 @@ export const scheduleService = {
   },
 
   remindAllOverdue: async () => {
-    const res = await fetch(`${config.baseURL}/schedules/remind-overdue`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/remind-overdue`, {
       method: 'POST',
       headers: getAuthHeader(),
     });
@@ -168,4 +169,4 @@ export const scheduleService = {
 
     return json;
   },
-};
+};

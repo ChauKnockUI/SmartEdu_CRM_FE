@@ -1,3 +1,4 @@
+import { detailDescriptions } from '../../shared/utils/detailLayout';
 import { paginationProps } from '../../shared/utils/pagination';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -26,6 +27,7 @@ import { MailOutlined, PhoneOutlined, PlusOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useParams, useSearchParams } from 'react-router';
 import { PageHeader } from '../../shared/components/PageHeader';
+import { PageState } from '../../shared/components/PageState';
 import { useAuth } from '../../shared/contexts/AuthContext';
 import { leadService, type LeadSourceOption } from '@/services/api/lead.service';
 import { courseService } from '@/services/api/course.service';
@@ -76,11 +78,13 @@ function formatDate(value?: string | null) {
 }
 
 export function LeadDetailPage() {
-  const { openDetail } = useDetailNavigation();
+  const { openDetail, goBack } = useDetailNavigation();
   const [convertOpen, setConvertOpen] = useState(false);
   const { id } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
+  const detailScope = `${id}:${user?.id}:${user?.role}`;
+  const [detailOwner, setDetailOwner] = useState(''), [detailError, setDetailError] = useState('');
   const [lead, setLead] = useState<any>(null);
   const [sourceOptions, setSourceOptions] = useState<LeadSourceOption[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
@@ -96,7 +100,7 @@ export function LeadDetailPage() {
   const [sales, setSales] = useState<any[]>([]);
   const [assignOpen, setAssignOpen] = useState(false);
   const [assignSaleId, setAssignSaleId] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
@@ -115,12 +119,15 @@ export function LeadDetailPage() {
     const requestId = ++detailRequest.current;
     try {
       setLoading(true);
+      setDetailError('');
       const res = await leadService.getById(id);
       if (requestId !== detailRequest.current) return;
       setLead(res.data);
+      setDetailOwner(detailScope);
     } catch (err: any) {
-      console.error(err);
-      message.error(err.message || 'Không tải được thông tin lead');
+      if (requestId === detailRequest.current) {
+        setLead(null); setDetailOwner(detailScope); setDetailError(err.message || 'Không tải được thông tin Lead.');
+      }
     } finally {
       if (requestId === detailRequest.current) setLoading(false);
     }
@@ -190,7 +197,7 @@ export function LeadDetailPage() {
       refreshTimers.current.forEach(clearTimeout);
       refreshTimers.current = [];
     };
-  }, [id, user?.role]);
+  }, [id, user?.id, user?.role]);
 
   const queueRefresh = () => {
     refreshTimers.current.push(setTimeout(() => { fetchDetail(); fetchActivities(); }, 2500));
@@ -335,8 +342,9 @@ export function LeadDetailPage() {
     );
   }
 
-  if (loading && !lead) return <Spin />;
-  if (!lead) return <Empty description="Không tìm thấy lead hoặc bạn không có quyền truy cập" />;
+  if (detailOwner !== detailScope || !lead) return <PageState loading={loading || detailOwner !== detailScope}
+    title={loading || detailOwner !== detailScope ? 'Đang tải Lead...' : 'Không tải được Lead'}
+    description={detailError || 'Lead không tồn tại hoặc không thuộc phạm vi được xem.'} onRetry={fetchDetail} onBack={goBack} />;
 
   const tabs = [
     {
@@ -371,7 +379,7 @@ export function LeadDetailPage() {
     {
       key: 'overview',
       label: 'Thông tin lead',
-      children: <Card><Descriptions column={{ xs: 1, md: 2 }} bordered size="small">
+      children: <Card><Descriptions {...detailDescriptions}>
         <Descriptions.Item label="Họ tên">{lead.full_name}</Descriptions.Item>
         <Descriptions.Item label="Người phụ trách">{lead.assignedUser?.full_name || 'Chưa phân công'}</Descriptions.Item>
         <Descriptions.Item label="Điện thoại">{lead.phone || '-'}</Descriptions.Item>
@@ -382,7 +390,7 @@ export function LeadDetailPage() {
         <Descriptions.Item label="Mục tiêu học">{studyPurposeLabels[lead.study_purpose] || lead.study_purpose || '-'}</Descriptions.Item>
         <Descriptions.Item label="Ngày tạo">{formatDate(lead.createdAt)}</Descriptions.Item>
         <Descriptions.Item label="Liên hệ gần nhất">{formatDate(lead.last_contacted)}</Descriptions.Item>
-        <Descriptions.Item label="Ghi chú" span={2}><span className="whitespace-pre-wrap break-words">{lead.notes || '-'}</span></Descriptions.Item>
+        <Descriptions.Item label="Ghi chú" span="filled"><span className="whitespace-pre-wrap break-words">{lead.notes || '-'}</span></Descriptions.Item>
       </Descriptions></Card>,
     },
   ];

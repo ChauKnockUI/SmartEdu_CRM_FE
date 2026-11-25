@@ -1,3 +1,4 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
@@ -11,7 +12,7 @@ const getAuthHeader = () => ({
 export const attendanceService = {
   // GET session attendance with student list
   getSessionAttendance: async (scheduleId: number, signal?: AbortSignal) => {
-    const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}`, {
+    const res = await apiFetch(`${config.baseURL}/attendance/sessions/${scheduleId}`, {
       headers: getAuthHeader(),
       signal,
     });
@@ -23,7 +24,7 @@ export const attendanceService = {
 
   // GET absence list for a session
   getAbsenceList: async (scheduleId: number) => {
-    const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}/absences`, {
+    const res = await apiFetch(`${config.baseURL}/attendance/sessions/${scheduleId}/absences`, {
       headers: getAuthHeader(),
     });
 
@@ -44,7 +45,7 @@ export const attendanceService = {
       }[];
     }
   ) => {
-    const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}/mark`, {
+    const res = await apiFetch(`${config.baseURL}/attendance/sessions/${scheduleId}/mark`, {
       method: 'PATCH',
       headers: getAuthHeader(),
       body: JSON.stringify(payload),
@@ -57,7 +58,7 @@ export const attendanceService = {
 
   // GET student attendance history for a class
   getStudentHistory: async (studentId: number, classId: number) => {
-    const res = await fetch(
+    const res = await apiFetch(
       `${config.baseURL}/attendance/students/${studentId}/classes/${classId}/history`,
       {
         headers: getAuthHeader(),
@@ -71,7 +72,7 @@ export const attendanceService = {
 
   // Admin Mở / Khóa quyền điểm danh
   toggleUnlock: async (scheduleId: number, unlock: boolean) => {
-    const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}/unlock`, {
+    const res = await apiFetch(`${config.baseURL}/attendance/sessions/${scheduleId}/unlock`, {
       method: 'PATCH',
       headers: getAuthHeader(),
       body: JSON.stringify({ unlock }),
@@ -83,7 +84,7 @@ export const attendanceService = {
 
   // Giáo viên yêu cầu mở khóa
   requestUnlock: async (scheduleId: number) => {
-    const res = await fetch(`${config.baseURL}/attendance/sessions/${scheduleId}/request-unlock`, {
+    const res = await apiFetch(`${config.baseURL}/attendance/sessions/${scheduleId}/request-unlock`, {
       method: 'POST',
       headers: getAuthHeader(),
     });

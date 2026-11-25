@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -7,9 +7,9 @@ import {
   Card,
   message,
   Modal,
+  Row,
   Select,
   Space,
-  Spin,
   Table,
   Tag,
 } from 'antd';
@@ -28,7 +28,10 @@ import { classService } from '../../services/api/class.service';
 import { scheduleService } from '../../services/api/schedule.service';
 import dayjs from 'dayjs';
 import 'dayjs/locale/vi';
-import { SessionAttendanceTag, SessionStatusTag, type SessionChangeState } from './sessionStatus';
+import { getSessionStatus, SessionAttendanceTag, SessionStatusTag, type SessionChangeState } from './sessionStatus';
+import { getClassStatus } from './classFilters';
+import { PageState } from '../../shared/components/PageState';
+import { SummaryCard } from '../../shared/components/SummaryCard';
 
 dayjs.locale('vi');
 
@@ -207,46 +210,17 @@ export const formatClassSchedule = (classItem: any) => {
   return { daysText, timeText };
 };
 
-const CLASS_STATUS_CONFIG: Record<
-  string,
-  { label: string; color: string }
-> = {
-  upcoming: { label: 'Sắp khai giảng', color: 'processing' },
-  ongoing: { label: 'Đang diễn ra', color: 'success' },
-  active: { label: 'Đang diễn ra', color: 'success' },
-  completed: { label: 'Đã kết thúc', color: 'default' },
-  cancelled: { label: 'Đã hủy', color: 'error' },
-  paused: { label: 'Tạm dừng', color: 'warning' },
-};
-
-const computeClassStatus = (cls: MyClass): string => {
-  // Nếu đã bị hủy thủ công thì ưu tiên giữ nguyên
-  if (cls.status === 'cancelled') return 'cancelled';
-
-  const today = dayjs().startOf('day');
-  const startDate = cls.start_date ? dayjs(cls.start_date).startOf('day') : null;
-  const endDate = cls.end_date ? dayjs(cls.end_date).endOf('day') : null;
-
-  if (startDate && startDate.isValid()) {
-    if (today.isBefore(startDate)) {
-      return 'upcoming'; // Chưa tới ngày khai giảng
-    }
-    if (endDate && endDate.isValid() && today.isAfter(endDate)) {
-      return 'completed'; // Đã qua ngày kết thúc
-    }
-    return 'ongoing'; // Đã tới/qua ngày khai giảng -> Đang diễn ra
-  }
-
-  return cls.status || 'ongoing';
-};
-
 export function MySchedulePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const role = user?.role;
+  const scope = `${user?.id}:${role}`;
+  const currentScope = useRef(scope); currentScope.current = scope;
+  const requestId = useRef(0);
 
   const [viewType, setViewType] = useState<ViewType>('list');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(''), [owner, setOwner] = useState('');
   const [classes, setClasses] = useState<MyClass[]>([]);
   const [sessions, setSessions] = useState<MySession[]>([]);
   const [selectedDate, setSelectedDate] = useState(dayjs());
@@ -257,20 +231,19 @@ export function MySchedulePage() {
   const isStudent = role === 'student';
 
   useEffect(() => {
+    setDayDetailVisible(false); setSelectedDaySessions([]);
     fetchMyScheduleData();
-  }, []);
+    return () => { requestId.current++; };
+  }, [scope]);
 
   const fetchMyScheduleData = async () => {
+    const request = ++requestId.current, context = currentScope.current;
     try {
-      setLoading(true);
+      setLoading(true); setLoadError('');
 
       const [classRes, scheduleRes] = await Promise.all([
-        classService.getMyClasses
-          ? classService.getMyClasses()
-          : classService.getAll({ limit: 100 }),
-        scheduleService.getMySchedules
-          ? scheduleService.getMySchedules()
-          : scheduleService.getAll(),
+        classService.getMyClasses(),
+        scheduleService.getMySchedules(),
       ]);
 
       const classList = getArrayData(classRes).map((item: any) => ({
@@ -306,12 +279,15 @@ export function MySchedulePage() {
         };
       });
 
-      setClasses(classList);
+      if (request !== requestId.current || context !== currentScope.current) return;
+      setOwner(context); setClasses(classList);
       setSessions(sessionList);
     } catch (error: any) {
-      message.error(error.message || 'Lỗi tải lịch học');
+      if (request === requestId.current && context === currentScope.current) {
+        setOwner(context); setClasses([]); setSessions([]); setLoadError(error.message || 'Không tải được lịch học.');
+      }
     } finally {
-      setLoading(false);
+      if (request === requestId.current && context === currentScope.current) setLoading(false);
     }
   };
 
@@ -349,7 +325,8 @@ export function MySchedulePage() {
       .map((session) => ({
         type: session.status === 'cancelled' || (isStudent && session.attendances?.[0]?.status === 'absent') ? 'error'
           : isStudent && session.attendances?.[0]?.status === 'late' ? 'warning' : session.attendances?.length ? 'success' : 'processing',
-        content: `${formatTime(session.startTime)} - ${session.className}${session.status === 'cancelled' ? ' (Đã hủy)' : ''}`,
+        content: `${formatTime(session.startTime)} - ${session.className}${session.status === 'cancelled' || session.scheduleChange?.isMakeup || session.scheduleChange?.pendingMakeup
+          ? ` (${getSessionStatus(session.status, session.scheduleChange).label})` : ''}`,
       }));
   };
 
@@ -465,11 +442,7 @@ export function MySchedulePage() {
       title: 'Trạng thái',
       key: 'status',
       render: (_, record) => {
-        const actualStatus = computeClassStatus(record);
-        const config = CLASS_STATUS_CONFIG[actualStatus] || {
-          label: 'Đang diễn ra',
-          color: 'success',
-        };
+        const config = getClassStatus(record.status || '');
         return <Tag color={config.color}>{config.label}</Tag>;
       },
     },
@@ -571,16 +544,12 @@ export function MySchedulePage() {
     },
   ];
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <Spin size="large" />
-      </div>
-    );
-  }
+  if (loading || owner !== scope || loadError) return <PageState loading={loading || owner !== scope}
+    title={loading || owner !== scope ? 'Đang tải lịch...' : 'Không tải được lịch'} description={loadError}
+    onRetry={fetchMyScheduleData} onBack={() => navigate('/dashboard')} />;
 
   return (
-    <div className="crm-page">
+    <div className="crm-page crm-schedule-page">
       <PageHeader
         title={isTeacher ? 'Lịch dạy của tôi' : 'Lịch học của tôi'}
         breadcrumbs={[
@@ -611,7 +580,7 @@ export function MySchedulePage() {
               <div className="font-medium text-blue-900 mb-2">Có {todaySessions.length} buổi học hôm nay:</div>
               <div className="mt-2 space-y-1.5">
                 {todaySessions.map((session) => (
-                  <div key={session.id} className="flex items-center gap-2 text-sm">
+                  <div key={session.id} className="flex flex-wrap items-center gap-2 text-sm">
                     <Tag color="blue" className="font-mono">
                       {formatTime(session.startTime)} - {formatTime(session.endTime)}
                     </Tag>
@@ -646,56 +615,22 @@ export function MySchedulePage() {
         className="mb-6 shadow-sm border-blue-200"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">{classes.length}</div>
-            <div className="text-gray-600 mt-1">
-              {isTeacher ? 'Lớp đang dạy' : 'Lớp đang học'}
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">
-              {upcomingSessions.length}
-            </div>
-            <div className="text-gray-600 mt-1">Buổi sắp tới</div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-orange-600">
-              {Math.round(weeklyHours)}h
-            </div>
-            <div className="text-gray-600 mt-1">
-              {isTeacher ? 'Giờ dạy tuần này' : 'Giờ học tuần này'}
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-purple-600">
-              {isTeacher
-                ? classes.reduce((total, item) => total + (item.students || 0), 0)
-                : sessions.filter(item => item.status !== 'cancelled' && item.attendances?.some(att => ['present', 'late'].includes(att.status))).length}
-            </div>
-            <div className="text-gray-600 mt-1">
-              {isTeacher ? 'Tổng học viên' : 'Buổi đã học'}
-            </div>
-          </div>
-        </Card>
-      </div>
-
+      <Row className="crm-summary-grid" gutter={[16, 16]}>
+        <SummaryCard title={isTeacher ? 'Lớp phụ trách' : 'Lớp đang học'} value={classes.length} prefix={<CalendarOutlined />} caption="Trong danh sách lớp của bạn" />
+        <SummaryCard title="Buổi sắp tới" value={upcomingSessions.length} prefix={<ClockCircleOutlined />} caption="Theo lịch còn lại" />
+        <SummaryCard title={isTeacher ? 'Giờ dạy tuần này' : 'Giờ học tuần này'} value={Math.round(weeklyHours)} prefix={<ClockCircleOutlined />} suffix="h" caption="Theo lịch trong tuần" />
+        <SummaryCard title={isTeacher ? 'Lượt ghi danh' : 'Buổi đã tham gia'} prefix={<CheckCircleOutlined />}
+          value={isTeacher ? classes.reduce((total, item) => total + (item.students || 0), 0)
+            : sessions.filter(item => item.status !== 'cancelled' && item.attendances?.some(att => ['present', 'late'].includes(att.status))).length}
+          caption={isTeacher ? 'Tính theo từng lớp' : 'Có mặt và đi muộn'} />
+      </Row>
       {viewType === 'list' ? (
         <div className="space-y-6">
           <Card title={isTeacher ? 'Lớp đang dạy' : 'Lớp đang học'}>
             <Table
               dataSource={classes}
               rowKey="id"
+              scroll={{ x: 850 }}
               pagination={false}
               columns={classColumns}
               locale={{
@@ -710,6 +645,7 @@ export function MySchedulePage() {
             <Table
               dataSource={upcomingSessions}
               rowKey="id"
+              scroll={{ x: 750 }}
               pagination={false}
               columns={sessionColumns}
               locale={{ emptyText: 'Chưa có buổi học sắp tới' }}

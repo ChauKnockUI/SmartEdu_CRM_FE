@@ -1,3 +1,4 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
@@ -21,7 +22,7 @@ const buildQuery = (params?: Record<string, unknown>) => {
 };
 
 const request = async (endpoint: string, options?: RequestInit) => {
-  const res = await fetch(`${config.baseURL}${endpoint}`, {
+  const res = await apiFetch(`${config.baseURL}${endpoint}`, {
     ...options,
     headers: {
       ...getAuthHeader(),

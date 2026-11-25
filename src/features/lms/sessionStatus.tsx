@@ -1,13 +1,16 @@
 import { Tag } from 'antd';
 
 export type SessionChangeState = { pendingMakeup?: boolean; isMakeup?: boolean };
-export function SessionStatusTag({ status, scheduleChange }: { status?: string; scheduleChange?: SessionChangeState }) {
-  const meta = scheduleChange?.pendingMakeup ? { color: 'orange', label: 'Nghỉ · Chờ học bù' }
+export function getSessionStatus(status?: string, scheduleChange?: SessionChangeState) {
+  return scheduleChange?.pendingMakeup ? { color: 'orange', label: 'Nghỉ · Chờ học bù' }
     : scheduleChange?.isMakeup && status === 'scheduled' ? { color: 'cyan', label: 'Lịch học bù' }
     : status === 'cancelled' ? { color: 'red', label: 'Đã hủy' }
     : status === 'completed' ? { color: 'blue', label: 'Đã kết thúc' }
     : status === 'scheduled' ? { color: 'default', label: 'Đã lên lịch' }
     : { color: 'default', label: 'Chưa xác định' };
+}
+export function SessionStatusTag({ status, scheduleChange }: { status?: string; scheduleChange?: SessionChangeState }) {
+  const meta = getSessionStatus(status, scheduleChange);
   return <Tag color={meta.color}>{meta.label}</Tag>;
 }
 

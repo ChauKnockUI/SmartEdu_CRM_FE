@@ -1,3 +1,4 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
@@ -56,7 +57,7 @@ interface CourseClassesResponse extends CourseResponse<CourseClass[]> {
 }
 
 async function request<T>(path: string, fallbackMessage: string, options: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${config.baseURL}${path}`, {
+    const res = await apiFetch(`${config.baseURL}${path}`, {
         ...options,
         headers: getAuthHeader(),
     });

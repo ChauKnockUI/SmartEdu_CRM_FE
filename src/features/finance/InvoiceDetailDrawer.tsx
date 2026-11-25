@@ -1,3 +1,4 @@
+import { detailDescriptions } from '../../shared/utils/detailLayout';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Descriptions, Drawer, Empty, Input, Modal, Space, Spin, Table, Typography, message } from 'antd';
 import { PrinterOutlined, ReloadOutlined } from '@ant-design/icons';
@@ -83,7 +84,7 @@ export function InvoiceDetailDrawer({ invoiceId, onClose, onChanged }: {
       extra={<Button icon={<ReloadOutlined />} disabled={loading || saving} onClick={() => setReload(value => value + 1)}>Tải lại</Button>}>
       {loading || owner !== key ? <Spin /> : error ? <Alert type="error" showIcon message={error}
         action={<Button onClick={() => setReload(value => value + 1)}>Thử lại</Button>} /> : visible ? <Space direction="vertical" size={20} className="w-full">
-        <Descriptions column={{ xs: 1, sm: 2 }} size="small">
+        <Descriptions {...detailDescriptions} bordered={false}>
           <Descriptions.Item label="Mã khoản thu">{visible.invoice_no}</Descriptions.Item>
           <Descriptions.Item label="Trạng thái"><BillingStatusTag status={visible.collection_status} /></Descriptions.Item>
           <Descriptions.Item label="Học viên">{visible.student?.full_name}</Descriptions.Item>
@@ -95,7 +96,7 @@ export function InvoiceDetailDrawer({ invoiceId, onClose, onChanged }: {
           { title: 'Loại', dataIndex: 'type', render: value => itemLabels[value] || value },
           { title: 'Số tiền', dataIndex: 'amount', align: 'right', render: money },
         ]} />
-        <Descriptions column={2} size="small" bordered>
+        <Descriptions {...detailDescriptions}>
           <Descriptions.Item label="Tổng phí">{money(visible.total_amount)}</Descriptions.Item>
           <Descriptions.Item label="Giảm giá">{money(visible.discount_amount)}</Descriptions.Item>
           <Descriptions.Item label="Sau giảm giá">{money(visible.payable_amount)}</Descriptions.Item>

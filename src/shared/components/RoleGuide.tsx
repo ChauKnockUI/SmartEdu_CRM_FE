@@ -1,5 +1,4 @@
-import React from 'react';
-import { Modal, Typography, List, Tag } from 'antd';
+import { Modal, Typography, List } from 'antd';
 import { UserOutlined } from '@ant-design/icons';
 import type { UserRole } from '../contexts/AuthContext';
 
@@ -13,52 +12,48 @@ interface RoleGuideProps {
 
 const roleGuides: Record<UserRole, { title: string; description: string; features: string[] }> = {
   admin: {
-    title: 'Quản trị viên (Admin)',
-    description: 'Bạn có toàn quyền quản lý hệ thống',
+    title: 'Quản trị viên',
+    description: 'Quản lý hoạt động tuyển sinh, đào tạo và thu học phí của trung tâm.',
     features: [
-      '✅ Xem tất cả thông tin Leads, Students, Classes, Payments',
-      '✅ Phân công Leads cho Sale, chuyển lớp, quản lý enrollments',
-      '✅ Xem Dashboard tổng quan: KPIs, doanh thu, cảnh báo hệ thống',
-      '✅ Xem Audit logs và lịch sử thay đổi',
-      '✅ Quản lý users, settings, automation rules',
-      '✅ Export dữ liệu, báo cáo chi tiết',
+      'Lead: phân công Sale, theo dõi chăm sóc và chuyển thành học viên.',
+      'Học viên: quản lý hồ sơ, ghi danh vào lớp và theo dõi học phí.',
+      'Đào tạo: quản lý khóa học, lớp, giảng viên, phòng và lịch học.',
+      'Buổi học: kiểm tra điểm danh, lịch nghỉ, học bù và tài liệu.',
+      'Tài chính: theo dõi khoản phải thu, thanh toán và công nợ.',
+      'Tổng quan: mở từng nhóm cảnh báo để xem và xử lý công việc.',
     ],
   },
   sale: {
     title: 'Nhân viên Sale',
-    description: 'Chuyên chăm sóc Leads và thu học phí',
+    description: 'Chăm sóc Lead và theo dõi học viên trong phạm vi được phân công.',
     features: [
-      '✅ Quản lý Leads: thêm tương tác, gọi điện, chuyển đổi thành học viên',
-      '✅ Xem AI Lead Score và gợi ý hành động',
-      '✅ Theo dõi học phí: thu tiền, nhắc nợ, quản lý công nợ',
-      '✅ CSKH sau bán: upsell, gia hạn khóa học',
-      '✅ Dashboard Sale: leads ưu tiên, follow-up hôm nay, công nợ cần thu',
-      '✅ Kịch bản sale, checklist chốt đơn, lý do lost',
+      'Lead: tìm kiếm, ghi nhận kết quả chăm sóc và cập nhật giai đoạn khi đủ điều kiện.',
+      'Đã đăng ký: chuyển Lead thành học viên và kiểm tra việc xếp lớp.',
+      'Học viên phụ trách: xem hồ sơ và tình trạng học tập, học phí.',
+      'Tài chính: ghi nhận thanh toán và theo dõi công nợ trong phạm vi được xem.',
+      'Tổng quan: kiểm tra Lead cần chăm sóc và các cảnh báo cần xử lý.',
     ],
   },
   teacher: {
-    title: 'Giảng viên (Teacher)',
-    description: 'Quản lý giảng dạy và điểm danh',
+    title: 'Giảng viên',
+    description: 'Theo dõi lịch dạy và chăm sóc học viên trong các lớp được phân công.',
     features: [
-      '✅ Xem Leads học thử: thông tin chuẩn bị, ghi nhận đánh giá',
-      '✅ Xem lịch dạy, danh sách lớp, thông tin học viên',
-      '✅ Điểm danh nhanh: Present/Absent/Late + ghi chú',
-      '✅ Ghi nhận tiến bộ học viên, đánh giá buổi học',
-      '✅ Xem AI Risk: học viên cần can thiệp',
-      '✅ Dashboard Teacher: lịch dạy hôm nay, học viên cần chú ý',
+      'Lịch dạy: mở buổi học để xem giờ, phòng và các thay đổi lịch.',
+      'Điểm danh: ghi trạng thái, ghi chú và nội dung buổi học khi được phép.',
+      'Lớp học: xem danh sách học viên và các buổi trong lớp phụ trách.',
+      'Tài liệu: tải lên, tải về và quản lý tài liệu chung hoặc theo buổi được phân công.',
+      'Cảnh báo: kiểm tra buổi thiếu điểm danh và học viên cần hỗ trợ.',
     ],
   },
   student: {
-    title: 'Học viên (Student)',
-    description: 'Xem thông tin học tập của bản thân',
+    title: 'Học viên',
+    description: 'Theo dõi lịch học, tiến độ và học phí của bản thân.',
     features: [
-      '✅ Xem hồ sơ cá nhân, lớp học và học phí của chính mình',
-      '✅ Xem lịch học, calendar các buổi học sắp tới',
-      '✅ Xem điểm danh của mình (Present/Absent/Late)',
-      '✅ Xem học phí: lịch đóng, trạng thái thanh toán',
-      '✅ Tải tài liệu học tập, nộp bài tập',
-      '✅ Nhận thông báo: nhắc lịch học, thay đổi giờ, bài tập',
-      '✅ Dashboard Student: lịch học tuần, tiến độ, học phí',
+      'Lịch học của tôi: xem buổi sắp tới, phòng học và lịch nghỉ hoặc học bù.',
+      'Lớp học của tôi: xem thông tin lớp và tải tài liệu chung hoặc theo buổi.',
+      'Hồ sơ của tôi: xem thông tin cá nhân, lớp đang học, điểm danh và học phí.',
+      'Tổng quan: theo dõi tiến độ lớp, tỷ lệ tham gia và khoản học phí còn lại.',
+      'Thông báo: bấm chuông để xem thay đổi và mở thông tin liên quan.',
     ],
   },
 };
@@ -80,14 +75,15 @@ export function RoleGuide({ visible, onClose, role }: RoleGuideProps) {
       width={600}
     >
       <div className="space-y-4">
-        <Paragraph className="text-gray-600">
+        <Paragraph type="secondary">
           {guide.description}
         </Paragraph>
 
         <div>
           <Title level={5}>Các chức năng chính:</Title>
           <List
-            dataSource={guide.features}
+            size="small" dataSource={guide.features}
+            rowKey={feature => feature}
             renderItem={(feature) => (
               <List.Item>
                 <Typography.Text>{feature}</Typography.Text>
@@ -96,9 +92,10 @@ export function RoleGuide({ visible, onClose, role }: RoleGuideProps) {
           />
         </div>
 
-        <div className="bg-blue-50 p-4 rounded">
-          <strong>💡 Mẹo:</strong> Sử dụng dropdown "Role Switcher" ở góc trên bên phải để chuyển đổi giữa các role và trải nghiệm giao diện khác nhau!
-        </div>
+        <Paragraph type="secondary" className="mb-0 text-xs">
+          Dùng ô tìm kiếm và bộ lọc trong từng danh sách. Mở chi tiết để xem thông tin
+          và các thao tác được cấp quyền cho tài khoản của bạn.
+        </Paragraph>
       </div>
     </Modal>
   );

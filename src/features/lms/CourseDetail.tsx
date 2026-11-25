@@ -1,5 +1,9 @@
+import { detailDescriptions } from '../../shared/utils/detailLayout';
 import { useState, useEffect } from 'react';
-import { Alert, Card, Descriptions, Tag, Button, Table, Statistic, Row, Col, Spin } from 'antd';
+import { Alert, Card, Descriptions, Tag, Button, Table, Row } from 'antd';
+import { SummaryCard } from '../../shared/components/SummaryCard';
+import { PageState } from '../../shared/components/PageState';
+import { paginationProps } from '../../shared/utils/pagination';
 import { EditOutlined, TeamOutlined, BookOutlined, DollarOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router';
 import type { ColumnsType } from 'antd/es/table';
@@ -77,23 +81,12 @@ export function CourseDetailPage() {
   }, [id, classesReload, user?.id, user?.role]);
 
   if (loadingCourse || (course && course.id !== Number(id))) {
-    return <div className="text-center p-8"><Spin size="large" /></div>;
+    return <PageState loading title="Đang tải khóa học..." />;
   }
 
   if (!course) {
-    return (
-      <div className="text-center p-8">
-        <Alert
-          type="error"
-          showIcon
-          title={courseError || 'Không tìm thấy khóa học'}
-          action={<Button onClick={() => setCourseReload(value => value + 1)}>Thử lại</Button>}
-        />
-        <Button type="primary" onClick={() => goBack()} className="mt-4">
-          Quay lại
-        </Button>
-      </div>
-    );
+    return <PageState title="Không tải được khóa học" description={courseError || 'Khóa học không tồn tại hoặc không thuộc phạm vi được xem.'}
+      onRetry={() => setCourseReload(value => value + 1)} onBack={goBack} />;
   }
 
   const handleViewClass = (classId: number) => {
@@ -196,46 +189,16 @@ export function CourseDetailPage() {
 
       <div className="space-y-4">
         {/* Overview Statistics */}
-        <Card>
-          <Row gutter={16}>
-            <Col span={6}>
-              <Statistic
-                title="Tổng số lớp"
-                value={hasClassStats ? courseClasses.length : '—'}
-                prefix={<BookOutlined />}
-                valueStyle={{ color: '#1890ff' }}
-              />
-            </Col>
-            <Col span={6}>
-              <Statistic
-                title="Lớp đang hoạt động"
-                value={hasClassStats ? activeClasses : '—'}
-                prefix={<BookOutlined />}
-                valueStyle={{ color: '#52c41a' }}
-              />
-            </Col>
-            <Col span={6}>
-              <Statistic
-                title={user?.role === 'admin' ? 'Học viên đang ghi danh' : 'Học viên trong phạm vi'}
-                value={hasClassStats ? totalStudents ?? '—' : '—'}
-                prefix={<TeamOutlined />}
-              />
-            </Col>
-            <Col span={6}>
-              <Statistic
-                title="Học phí"
-                value={Number(course.fee || 0)}
-                prefix={<DollarOutlined />}
-                suffix="đ"
-                valueStyle={{ color: '#cf1322' }}
-              />
-            </Col>
-          </Row>
-        </Card>
+        <Row className="crm-summary-grid" gutter={[16, 16]}>
+          <SummaryCard title="Tổng số lớp" value={hasClassStats ? courseClasses.length : null} prefix={<BookOutlined />} caption="Trong phạm vi được xem" />
+          <SummaryCard title="Lớp đang hoạt động" value={hasClassStats ? activeClasses : null} prefix={<BookOutlined />} caption="Đang học và sắp mở" />
+          <SummaryCard title={user?.role === 'admin' ? 'Học viên đang ghi danh' : 'Học viên trong phạm vi'} value={hasClassStats ? totalStudents : null} prefix={<TeamOutlined />} caption="Không cộng trùng học viên" />
+          <SummaryCard title="Học phí" value={Number(course.fee || 0)} prefix={<DollarOutlined />} currency caption="Theo cấu hình khóa học" />
+        </Row>
 
         {/* Course Information */}
         <Card title="Thông tin khóa học">
-          <Descriptions column={2} bordered>
+          <Descriptions {...detailDescriptions}>
             <Descriptions.Item label="Mã khóa học">
               <span className="font-semibold">{course.id}</span>
             </Descriptions.Item>
@@ -262,7 +225,7 @@ export function CourseDetailPage() {
               {course.updatedAt && new Date(course.updatedAt).toLocaleDateString('vi-VN')}
             </Descriptions.Item>
             {course.description && (
-              <Descriptions.Item label="Mô tả" span={2}>
+              <Descriptions.Item label="Mô tả" span="filled">
                 {course.description}
               </Descriptions.Item>
             )}
@@ -304,7 +267,8 @@ export function CourseDetailPage() {
             dataSource={courseClasses}
             loading={loadingClasses}
             rowKey="id"
-            pagination={false}
+            scroll={{ x: 950 }}
+            pagination={paginationProps('lớp học', { defaultPageSize: 10 })}
           />
         </Card>
       </div>

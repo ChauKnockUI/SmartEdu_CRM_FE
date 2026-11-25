@@ -25,7 +25,7 @@ import { getLeadSourceLabel } from '../leadSources';
 import { getLeadGuidance } from '../leadGuidance';
 import { LeadCareSummary } from './LeadCareSummary';
 import { hasLeadAssignee, LEAD_ASSIGNMENT_REQUIRED, leadContactBlockReason, leadTransitionBlockReason } from '../leadAssignment';
-import { leadNeedsCare } from '../leadFilters';
+import { getLeadCareState } from '../leadFilters';
 import { LEAD_STATUSES, LEAD_OPEN_STAGES, LEAD_ACTIONS, LEAD_MESSAGES, type LeadStatus } from '../leadStatus';
 
 interface LeadPipelineBoardProps {
@@ -180,10 +180,7 @@ export function LeadPipelineBoard({
                     const canCare = hasLeadAssignee(lead);
                     const contactBlocked = leadContactBlockReason(lead);
                     const guidance = getLeadGuidance(lead);
-                    const daysSinceContact = lead.last_contacted
-                      ? dayjs().diff(dayjs(lead.last_contacted), 'day')
-                      : null;
-                    const isStale = leadNeedsCare(lead);
+                    const care = getLeadCareState(lead);
 
                     const menuItems = PIPELINE_COLUMNS.filter((c) => c.key !== lead.status).map(
                       (c) => ({
@@ -262,10 +259,11 @@ export function LeadPipelineBoard({
                             )}
                           </span>
 
-                          {isStale ? (
-                            <Tooltip title={lead.last_contacted ? `Chưa liên hệ lại ${daysSinceContact} ngày` : 'Chưa từng liên hệ'}>
-                              <span className="flex items-center gap-1 font-medium text-red-500">
-                                <ClockCircleOutlined /> {lead.last_contacted ? '>3 ngày' : 'Chưa liên hệ'}
+                          {care ? (
+                            <Tooltip title={`${care.reason}${care.waiting === null ? '' : lead.last_contacted && lead.assigned_to
+                              ? ` · ${care.waiting} ngày chưa liên hệ lại` : ` · Tạo ${care.waiting} ngày trước`}`}>
+                              <span className={`flex items-center gap-1 font-medium ${lead.last_contacted && lead.assigned_to ? 'text-red-500' : 'text-gray-500'}`}>
+                                <ClockCircleOutlined /> {lead.last_contacted && lead.assigned_to && care.waiting !== null ? `${care.waiting} ngày` : care.reason}
                               </span>
                             </Tooltip>
                           ) : (

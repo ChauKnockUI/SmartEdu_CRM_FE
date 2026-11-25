@@ -1,3 +1,4 @@
+import { detailDescriptions } from '../../shared/utils/detailLayout';
 import { useEffect, useRef, useState } from 'react';
 import {
   Card,
@@ -42,16 +43,17 @@ import { InvoiceDetailDrawer } from '../finance/InvoiceDetailDrawer';
 import { studentStatusColors as STATUS_COLORS, studentStatusLabels as STATUS_LABELS } from './studentFilters';
 import { getClassStatus } from './classFilters';
 import { StudentScheduleTab } from './StudentScheduleTab';
+import { PageState } from '../../shared/components/PageState';
 
 type Student = any;
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
 
 export function StudentProfileError({ error, own, onRetry }: { error: any; own: boolean; onRetry: () => void }) {
+  const { goBack } = useDetailNavigation();
   const title = error.status === 404 ? own ? 'Chưa có hồ sơ học viên liên kết' : 'Không tìm thấy hồ sơ trong phạm vi được xem'
     : error.status === 403 ? 'Không có quyền xem hồ sơ' : error.status === 401 ? 'Phiên đăng nhập không hợp lệ' : 'Không tải được hồ sơ học viên';
-  return <Alert type="error" showIcon message={title} description={error.message}
-    action={<Button onClick={onRetry}>Thử lại</Button>} />;
+  return <PageState title={title} description={error.message} onRetry={onRetry} onBack={goBack} />;
 }
 
 export function StudentDetailPage() {
@@ -269,7 +271,7 @@ export function StudentDetailPage() {
   };
 
   if (!student) {
-    return profileError ? <StudentProfileError error={profileError} own={isOwnProfile} onRetry={fetchStudent} /> : <Card loading />;
+    return profileError ? <StudentProfileError error={profileError} own={isOwnProfile} onRetry={fetchStudent} /> : <PageState loading title="Đang tải hồ sơ học viên..." />;
   }
 
   const enrolledClasses = student.classEnrollments || [];
@@ -414,7 +416,7 @@ export function StudentDetailPage() {
                 </Row>
 
                 <Card loading={loading}>
-                  <Descriptions bordered column={2}>
+                  <Descriptions {...detailDescriptions}>
                     <Descriptions.Item label="Họ tên">
                       {student.full_name}
                     </Descriptions.Item>
