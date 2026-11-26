@@ -14,6 +14,8 @@ import {
   QuestionCircleOutlined,
   ReadOutlined,
   RobotOutlined,
+  SettingOutlined,
+  MailOutlined,
   SwapOutlined,
   TeamOutlined,
   UserOutlined,
@@ -133,6 +135,9 @@ export function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('Công nợ', '/finance/debts', <DollarOutlined />),
     ]),
     getItem('Cảnh báo bỏ học', '/ai/predictions', <RobotOutlined />),
+    getItem('Cài đặt trung tâm', '/settings', <SettingOutlined />, [
+      getItem('Email chăm sóc', '/settings/email', <MailOutlined />),
+    ]),
   ];
 }
 

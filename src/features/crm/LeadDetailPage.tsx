@@ -539,8 +539,8 @@ export function LeadDetailPage() {
               label: value === 'email' ? 'Email đã gửi bên ngoài' : value === 'sms' ? 'SMS đã gửi bên ngoài' : label,
               disabled: value !== 'note' && !!contactBlocked, title: value !== 'note' ? contactBlocked : undefined }))} />
           </Form.Item>
-          <Form.Item name="content" label="Nội dung và bước tiếp theo" rules={[{ required: true }]}>
-            <Input.TextArea rows={4} placeholder="Nhu cầu của khách, điều còn phân vân và lịch liên hệ đã thống nhất..." />
+          <Form.Item name="content" label="Nội dung trao đổi" rules={[{ required: true }]}>
+            <Input.TextArea rows={4} placeholder="Ghi lại nhu cầu, phản hồi của khách và nội dung đã thống nhất. Nếu có hẹn liên hệ lại, ghi rõ thời gian." />
           </Form.Item>
           {activityType !== 'note' && <Form.Item name="engagement_status" label="Kết quả liên hệ">
             <Select

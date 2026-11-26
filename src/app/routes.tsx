@@ -24,6 +24,7 @@ import { ProtectedRoute } from '../shared/components/ProtectedRoute';
 import { RegisterPage } from '@/features/auth/registerPage';
 import { RoomsPage } from '@/features/lms/RoomPage';
 import { RoomDetailPage } from '@/features/lms/RoomDetailPage';
+import { EmailSettingsPage } from '../features/settings/EmailSettingsPage';
 
 function NotFoundPage() {
   const navigate = useNavigate();
@@ -125,7 +126,8 @@ export const router = createBrowserRouter([
             path: 'settings',
             element: <ProtectedRoute roles={['admin']} />,
             children: [
-              { index: true, element: <UnavailablePage /> },
+              { index: true, element: <Navigate to="/settings/email" replace /> },
+              { path: 'email', element: <EmailSettingsPage /> },
               { path: 'users', element: <UnavailablePage /> },
             ],
           },

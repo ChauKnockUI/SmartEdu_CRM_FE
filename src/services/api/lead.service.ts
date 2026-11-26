@@ -40,6 +40,7 @@ const request = async (endpoint: string, options?: RequestInit) => {
   if (!res.ok) throw Object.assign(new Error(json.message || 'Request failed'), {
     status: res.status,
     duplicateFields: json.duplicate_fields,
+    deliveryUnknown: json.delivery_unknown === true,
   });
   return json;
 };

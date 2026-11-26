@@ -307,6 +307,22 @@ Phân công đơn và hàng loạt dùng chung hộp thoại, gọi API cập nh
 nhóm tối đa 5 yêu cầu; giữ riêng Lead lỗi để thử lại. Đổi bộ lọc/trang hoặc tải lại
 sẽ bỏ lựa chọn. Sale không có thao tác phân công. Không thêm migration.
 
+## Email chăm sóc theo trung tâm
+
+Admin mở **Cài đặt trung tâm → Email chăm sóc** (`/settings/email`) để nhập tên
+hiển thị, Gmail gửi và Mật khẩu ứng dụng Google. Nút **Kiểm tra và lưu** xác nhận
+đăng nhập Gmail SMTP trước khi lưu, không gửi email thử. Chỉnh sửa sau có thể để trống
+mật khẩu để giữ giá trị cũ; mật khẩu không được trả về FE hoặc lưu vào localStorage.
+Tự loại bỏ khoảng trắng khi dán Mật khẩu ứng dụng 16 ký tự. Không dùng mật khẩu Google thông thường.
+Lỗi kiểm tra/lưu giữ nguyên thông tin đang nhập; tải lại/hủy có xác nhận nếu có thay đổi.
+Sale, giáo viên và học viên không truy cập được trang cài đặt.
+
+Hộp soạn email Lead tự dùng người gửi của trung tâm qua API hiện có. Cần triển khai
+BE với migration `20261125120000_tenant_email_settings` và đặt khóa mã hóa máy chủ
+trước khi sử dụng; xem hướng dẫn BE. Chuyển cấu hình từ Brevo sang Gmail không thêm
+migration. Nếu kết quả gửi chưa xác định, kiểm tra **Đã gửi** trong Gmail trước khi
+xác nhận gửi lại; không tự gửi lại khi mất phản hồi mạng. Không thêm thư viện FE.
+
 ## 📄 License
 
 MIT License

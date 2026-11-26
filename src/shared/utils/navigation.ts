@@ -3,7 +3,7 @@ export interface NavigationContext { from?: string; menuKey?: string; classId?: 
 export const SECTION_PATHS = ['/dashboard', '/crm/leads', '/lms/students', '/lms/teachers', '/lms/courses',
   '/lms/my-profile',
   '/lms/rooms', '/lms/classes', '/lms/schedule', '/lms/myschedule', '/lms/scheduling',
-  '/finance/invoices', '/finance/payments', '/finance/debts', '/ai/predictions'];
+  '/finance/invoices', '/finance/payments', '/finance/debts', '/ai/predictions', '/settings/email'];
 
 export const isDetailPath = (pathname: string) => /^\/(?:lms\/(?:classes|students|sessions|courses|rooms|teachers)|crm\/leads)\/[^/]+\/?$/.test(pathname);
 
