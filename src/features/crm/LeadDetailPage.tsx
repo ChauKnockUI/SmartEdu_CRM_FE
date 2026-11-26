@@ -531,8 +531,7 @@ export function LeadDetailPage() {
         onSent={() => { fetchDetail(); fetchActivities(); queueRefresh(); }} />
 
       <Drawer title="Ghi nhận kết quả chăm sóc" width={520} styles={{ wrapper: { maxWidth: '100vw' } }} open={activityOpen} onClose={() => setActivityOpen(false)} destroyOnClose>
-        <Alert className="mb-4" type="info" showIcon message="Ghi lại hoạt động đã thực hiện"
-          description="Lưu kết quả gọi điện, email/SMS đã gửi bên ngoài hoặc tư vấn trực tiếp. Để gửi email từ CRM, dùng nút Soạn email." />
+        <p className="mb-4 text-sm text-gray-500">Ghi nhận cuộc gọi, tin nhắn, email ngoài CRM hoặc tư vấn trực tiếp.</p>
         <Form form={activityForm} layout="vertical" onFinish={handleCreateActivity}>
           <Form.Item name="type" label="Loại tương tác" rules={[{ required: true }]}>
             <Select options={Object.entries(activityLabels).filter(([value]) => value !== 'status_change').map(([value, label]) => ({ value,

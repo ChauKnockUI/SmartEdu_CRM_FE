@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Button, Drawer, Form, Input, Space, Typography, message } from 'antd';
+import { Alert, Button, Drawer, Form, Input, Space, Spin, message } from 'antd';
+import { SendOutlined } from '@ant-design/icons';
 import { leadService } from '@/services/api/lead.service';
 import { leadContactBlockReason } from '../leadAssignment';
 import { useAuth } from '../../../shared/contexts/AuthContext';
@@ -7,11 +8,9 @@ import { Link } from 'react-router';
 
 export function LeadEmailNotice({ available }: { available: boolean }) {
   const { user } = useAuth();
-  return <Alert showIcon type={available ? 'info' : 'warning'}
-    message={available ? 'Gửi email từ CRM' : 'Chưa cấu hình dịch vụ gửi email'}
-    description={available
-      ? 'Email được gửi đến địa chỉ đang lưu trên Lead. Dịch vụ tiếp nhận email chưa có nghĩa là khách đã nhận hoặc đọc.'
-      : user?.role === 'admin' ? <Link to="/settings/email">Cấu hình email chăm sóc của trung tâm</Link>
+  if (available) return null;
+  return <Alert showIcon type="warning" message="Chưa kết nối email trung tâm"
+    description={user?.role === 'admin' ? <Link to="/settings/email">Mở cài đặt email</Link>
         : 'Vui lòng liên hệ Admin trung tâm để cấu hình email chăm sóc.'} />;
 }
 
@@ -75,27 +74,39 @@ export function LeadEmailDrawer({ open, lead, onClose, onSent }: { open: boolean
     }
   };
 
-  return <Drawer title="Soạn và gửi email" open={open} width={520} styles={{ wrapper: { maxWidth: '100vw' } }}
-    onClose={() => { if (!busy.current) onClose(); }} maskClosable={!sending} closable={!sending} keyboard={!sending}>
-    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+  return <Drawer title="Soạn email" open={open} width={600} rootClassName="crm-email-drawer"
+    styles={{ wrapper: { maxWidth: '100vw' }, body: { padding: 0 } }}
+    onClose={() => { if (!busy.current) onClose(); }} maskClosable={!sending} closable={!sending} keyboard={!sending}
+    footer={<div className="crm-email-actions">
+      <span className="crm-email-caption">Ghi lại trong lịch sử chăm sóc</span>
+      <Space>
+        <Button onClick={onClose} disabled={sending}>Hủy</Button>
+        <Button type="primary" icon={<SendOutlined />} loading={sending} onClick={() => form.submit()}
+          disabled={deliveryUnknown || !config?.available || !!blocked}>Gửi email</Button>
+      </Space>
+    </div>}>
+    <dl className="crm-email-addresses">
+      <div><dt>Đến</dt><dd><span className="crm-email-name">{lead.full_name}</span><span>{lead.email}</span></dd></div>
+      <div><dt>Từ</dt><dd>{config?.from || (configError || config ? 'Chưa kết nối email trung tâm' : <Space size="small"><Spin size="small" />Đang tải người gửi…</Space>)}</dd></div>
+    </dl>
+    {(configError || blocked || error || config && !config.available) && <div className="crm-email-notices">
       {configError ? <Alert type="error" showIcon message={configError} action={<Button onClick={loadConfig}>Thử lại</Button>} />
-        : config ? <LeadEmailNotice available={config.available} /> : <Typography.Text>Đang kiểm tra dịch vụ email...</Typography.Text>}
+        : config && <LeadEmailNotice available={config.available} />}
       {blocked && <Alert type="warning" showIcon message={blocked} />}
       {error && <Alert type={deliveryUnknown ? 'warning' : 'error'} showIcon message={error}
         description={deliveryUnknown ? 'Chỉ gửi lại nếu thư chưa có trong mục Đã gửi của Gmail trung tâm.' : undefined} />}
       {deliveryUnknown && <Button onClick={() => { setDeliveryUnknown(false); setError(''); draft.current = null; }}>Tôi đã kiểm tra Gmail</Button>}
-      <Form form={form} layout="vertical" onFinish={send} disabled={sending}>
-        {config?.from && <Typography.Paragraph type="secondary">Người gửi: {config.from}</Typography.Paragraph>}
-        <Form.Item label="Người nhận"><Input value={lead.email} readOnly /></Form.Item>
-        <Form.Item name="subject" label="Tiêu đề" rules={[{ required: true, whitespace: true, message: 'Nhập tiêu đề email' },
-          { max: 200, message: 'Tiêu đề tối đa 200 ký tự' }]}><Input maxLength={200} /></Form.Item>
-        <Form.Item name="text" label="Nội dung" rules={[{ required: true, whitespace: true, message: 'Nhập nội dung email' },
-          { max: 10000, message: 'Nội dung tối đa 10.000 ký tự' }]}><Input.TextArea rows={8} maxLength={10000} showCount /></Form.Item>
-        <Space>
-          <Button type="primary" htmlType="submit" loading={sending} disabled={deliveryUnknown || !config?.available || !!blocked}>Gửi email</Button>
-          <Button onClick={onClose} disabled={sending}>Hủy</Button>
-        </Space>
-      </Form>
-    </Space>
+    </div>}
+    <Form form={form} className="crm-email-composer" layout="vertical" onFinish={send} disabled={sending}>
+      <Form.Item name="subject" className="crm-email-subject" style={{ marginBottom: 0 }}
+        rules={[{ required: true, whitespace: true, message: 'Nhập tiêu đề email' }, { max: 200, message: 'Tiêu đề tối đa 200 ký tự' }]}>
+        <Input variant="borderless" aria-label="Tiêu đề email" placeholder="Tiêu đề" maxLength={200} />
+      </Form.Item>
+      <Form.Item name="text" className="crm-email-content" style={{ marginBottom: 0 }}
+        rules={[{ required: true, whitespace: true, message: 'Nhập nội dung email' }, { max: 10000, message: 'Nội dung tối đa 10.000 ký tự' }]}>
+        <Input.TextArea variant="borderless" aria-label="Nội dung email" placeholder="Nhập nội dung email…"
+          autoSize={{ minRows: 12, maxRows: 22 }} maxLength={10000} />
+      </Form.Item>
+    </Form>
   </Drawer>;
 }
