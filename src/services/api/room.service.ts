@@ -1,3 +1,4 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
@@ -22,7 +23,7 @@ export const roomService = {
         if (params.min_capacity)
             query.append('min_capacity', params.min_capacity.toString());
 
-        const res = await fetch(`${config.baseURL}/rooms?${query}`, {
+        const res = await apiFetch(`${config.baseURL}/rooms?${query}`, {
             headers: getAuthHeader(),
         });
 
@@ -33,9 +34,10 @@ export const roomService = {
         return json;
     },
 
-    getById: async (id: number) => {
-        const res = await fetch(`${config.baseURL}/rooms/${id}`, {
+    getById: async (id: number, signal?: AbortSignal) => {
+        const res = await apiFetch(`${config.baseURL}/rooms/${id}`, {
             headers: getAuthHeader(),
+            signal,
         });
 
         const json = await res.json();
@@ -45,7 +47,7 @@ export const roomService = {
     },
 
     create: async (data: any) => {
-        const res = await fetch(`${config.baseURL}/rooms`, {
+        const res = await apiFetch(`${config.baseURL}/rooms`, {
             method: 'POST',
             headers: getAuthHeader(),
             body: JSON.stringify(data),
@@ -58,7 +60,7 @@ export const roomService = {
     },
 
     update: async (id: number, data: any) => {
-        const res = await fetch(`${config.baseURL}/rooms/${id}`, {
+        const res = await apiFetch(`${config.baseURL}/rooms/${id}`, {
             method: 'PUT',
             headers: getAuthHeader(),
             body: JSON.stringify(data),
@@ -71,7 +73,7 @@ export const roomService = {
     },
 
     remove: async (id: number) => {
-        const res = await fetch(`${config.baseURL}/rooms/${id}`, {
+        const res = await apiFetch(`${config.baseURL}/rooms/${id}`, {
             method: 'DELETE',
             headers: getAuthHeader(),
         });

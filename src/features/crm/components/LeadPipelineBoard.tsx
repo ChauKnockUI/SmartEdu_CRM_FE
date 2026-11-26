@@ -24,6 +24,9 @@ import { MarkLostModal } from './MarkLostModal';
 import { getLeadSourceLabel } from '../leadSources';
 import { getLeadGuidance } from '../leadGuidance';
 import { LeadCareSummary } from './LeadCareSummary';
+import { hasLeadAssignee, LEAD_ASSIGNMENT_REQUIRED, leadContactBlockReason, leadTransitionBlockReason } from '../leadAssignment';
+import { getLeadCareState } from '../leadFilters';
+import { LEAD_STATUSES, LEAD_OPEN_STAGES, LEAD_ACTIONS, LEAD_MESSAGES, type LeadStatus } from '../leadStatus';
 
 interface LeadPipelineBoardProps {
   sourceOptions: LeadSourceOption[];
@@ -31,9 +34,10 @@ interface LeadPipelineBoardProps {
   loading: boolean;
   onRefresh: () => void;
   onConvert: (lead: any) => void;
+  includeLost?: boolean;
 }
 
-export type PipelineStageKey = 'new' | 'contacted' | 'interested' | 'trial' | 'enrolled' | 'lost';
+export type PipelineStageKey = LeadStatus;
 
 interface PipelineColumnDef {
   key: PipelineStageKey;
@@ -43,46 +47,11 @@ interface PipelineColumnDef {
   nextLabel?: string;
 }
 
-const PIPELINE_COLUMNS: PipelineColumnDef[] = [
-  {
-    key: 'new',
-    label: '1. Mới tiếp nhận',
-    color: '#1677ff',
-    nextStage: 'contacted',
-    nextLabel: 'Đã liên hệ',
-  },
-  {
-    key: 'contacted',
-    label: '2. Đã liên hệ',
-    color: '#13c2c2',
-    nextStage: 'interested',
-    nextLabel: 'Quan tâm',
-  },
-  {
-    key: 'interested',
-    label: '3. Quan tâm cao',
-    color: '#faad14',
-    nextStage: 'trial',
-    nextLabel: 'Học thử',
-  },
-  {
-    key: 'trial',
-    label: '4. Đang học thử',
-    color: '#722ed1',
-    nextStage: 'enrolled',
-    nextLabel: 'Chốt đăng ký',
-  },
-  {
-    key: 'enrolled',
-    label: '5. Đã đăng ký (Won)',
-    color: '#52c41a',
-  },
-  {
-    key: 'lost',
-    label: 'Thất bại (Lost)',
-    color: '#ff4d4f',
-  },
-];
+const PIPELINE_COLUMNS: PipelineColumnDef[] = LEAD_STATUSES.map((stage, index) => {
+  const next = stage.value !== 'lost' ? LEAD_OPEN_STAGES[index + 1] : undefined;
+  return { key: stage.value, label: stage.label, color: stage.hex, nextStage: next?.value,
+    nextLabel: next ? next.value === 'enrolled' ? LEAD_ACTIONS.convert : `Chuyển sang ${next.label}` : undefined };
+});
 
 export function LeadPipelineBoard({
   sourceOptions,
@@ -90,6 +59,7 @@ export function LeadPipelineBoard({
   loading,
   onRefresh,
   onConvert,
+  includeLost = false,
 }: LeadPipelineBoardProps) {
   const navigate = useNavigate();
 
@@ -122,13 +92,19 @@ export function LeadPipelineBoard({
   }, [leads]);
 
   const handleMoveStage = async (leadId: number, targetStage: PipelineStageKey) => {
+    if (movingLeadId !== null) return;
+    const lead = leads.find(item => item.id === leadId);
+    if (!lead) return;
+    const reason = leadTransitionBlockReason(lead, targetStage);
+    if (reason) {
+      message.warning(reason);
+      return;
+    }
     if (targetStage === 'enrolled') {
-      const lead = leads.find(item => item.id === leadId);
-      if (lead) onConvert(lead);
+      onConvert(lead);
       return;
     }
     if (targetStage === 'lost') {
-      const lead = leads.find((l) => l.id === leadId);
       setLostTargetLead(lead);
       return;
     }
@@ -136,26 +112,26 @@ export function LeadPipelineBoard({
     try {
       setMovingLeadId(leadId);
       await leadService.update(String(leadId), { status: targetStage });
-      message.success('Đã cập nhật giai đoạn phễu');
+      message.success(LEAD_MESSAGES.stageUpdated);
       onRefresh();
     } catch (err: any) {
-      message.error(err.message || 'Không thể chuyển giai đoạn');
+      message.error(err.message || LEAD_MESSAGES.stageFailed);
     } finally {
       setMovingLeadId(null);
     }
   };
 
   const visibleColumns = useMemo(() => {
-    if (showLostColumn) return PIPELINE_COLUMNS;
+    if (showLostColumn || includeLost) return PIPELINE_COLUMNS;
     return PIPELINE_COLUMNS.filter((col) => col.key !== 'lost');
-  }, [showLostColumn]);
+  }, [showLostColumn, includeLost]);
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Space size={12} wrap>
           <Space size={6}>
-            <Switch size="small" checked={showLostColumn} onChange={setShowLostColumn} />
+            <Switch size="small" checked={showLostColumn || includeLost} disabled={includeLost} onChange={setShowLostColumn} />
             <span className="text-xs text-gray-600">Hiện lead thất bại</span>
           </Space>
         </Space>
@@ -169,7 +145,7 @@ export function LeadPipelineBoard({
         className="flex gap-3.5 overflow-x-auto pb-4"
         style={{ minHeight: 360 }}
       >
-        {visibleColumns.map((col) => {
+        {visibleColumns.map((col, index) => {
           const colLeads = columnsData[col.key] || [];
 
           return (
@@ -184,7 +160,7 @@ export function LeadPipelineBoard({
                       className="inline-block h-3 w-3 rounded-full"
                       style={{ backgroundColor: col.color }}
                     />
-                    <span className="font-semibold text-gray-800">{col.label}</span>
+                    <span className="font-semibold text-gray-800">{col.key === 'lost' ? col.label : `${index + 1}. ${col.label}`}</span>
                   </div>
                   <Badge
                     count={colLeads.length}
@@ -201,18 +177,17 @@ export function LeadPipelineBoard({
                   </div>
                 ) : (
                   colLeads.map((lead) => {
+                    const canCare = hasLeadAssignee(lead);
+                    const contactBlocked = leadContactBlockReason(lead);
                     const guidance = getLeadGuidance(lead);
-                    const daysSinceContact = lead.last_contacted
-                      ? dayjs().diff(dayjs(lead.last_contacted), 'day')
-                      : null;
-                    const isStale =
-                      ['new', 'contacted', 'interested', 'trial'].includes(lead.status) &&
-                      (daysSinceContact === null || daysSinceContact >= 3);
+                    const care = getLeadCareState(lead);
 
                     const menuItems = PIPELINE_COLUMNS.filter((c) => c.key !== lead.status).map(
                       (c) => ({
                         key: c.key,
-                        label: `Chuyển sang: ${c.label}`,
+                        label: <Tooltip title={leadTransitionBlockReason(lead, c.key)}><span>{
+                          c.key === 'enrolled' ? LEAD_ACTIONS.convert : c.key === 'lost' ? LEAD_ACTIONS.lost : `Chuyển sang ${c.label}`}</span></Tooltip>,
+                        disabled: !!leadTransitionBlockReason(lead, c.key),
                         onClick: () => handleMoveStage(lead.id, c.key),
                       })
                     );
@@ -260,7 +235,8 @@ export function LeadPipelineBoard({
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-1 text-xs text-gray-500">
                           {lead.phone && (
                             <a
-                              href={`tel:${lead.phone}`}
+                              href={!contactBlocked ? `tel:${lead.phone}` : undefined}
+                              title="Mở ứng dụng gọi trên thiết bị; ghi nhận kết quả sau cuộc gọi."
                               onClick={(e) => e.stopPropagation()}
                               className="flex items-center gap-1 text-gray-600 hover:text-blue-600"
                             >
@@ -272,8 +248,8 @@ export function LeadPipelineBoard({
                           </Tag>
                         </div>
 
-                        {!guidance.closed && <Tooltip title={guidance.action}>
-                          <div className="mt-2 rounded-md bg-gray-50 px-2 py-1.5 text-xs text-gray-600 line-clamp-2">Tiếp: {guidance.title}</div>
+                        {!guidance.closed && <Tooltip title={canCare ? guidance.action : LEAD_ASSIGNMENT_REQUIRED}>
+                          <div className="mt-2 rounded-md bg-gray-50 px-2 py-1.5 text-xs text-gray-600 line-clamp-2">Tiếp: {canCare ? guidance.title : 'Phân công Sale phụ trách'}</div>
                         </Tooltip>}
 
                         <div className="mt-2 flex items-center justify-between pt-1 border-t border-gray-100 text-[11px] text-gray-500">
@@ -283,10 +259,11 @@ export function LeadPipelineBoard({
                             )}
                           </span>
 
-                          {isStale ? (
-                            <Tooltip title={lead.last_contacted ? `Chưa liên hệ lại ${daysSinceContact} ngày` : 'Chưa từng liên hệ'}>
-                              <span className="flex items-center gap-1 font-medium text-red-500">
-                                <ClockCircleOutlined /> {lead.last_contacted ? '>3 ngày' : 'Chưa liên hệ'}
+                          {care ? (
+                            <Tooltip title={`${care.reason}${care.waiting === null ? '' : lead.last_contacted && lead.assigned_to
+                              ? ` · ${care.waiting} ngày chưa liên hệ lại` : ` · Tạo ${care.waiting} ngày trước`}`}>
+                              <span className={`flex items-center gap-1 font-medium ${lead.last_contacted && lead.assigned_to ? 'text-red-500' : 'text-gray-500'}`}>
+                                <ClockCircleOutlined /> {lead.last_contacted && lead.assigned_to && care.waiting !== null ? `${care.waiting} ngày` : care.reason}
                               </span>
                             </Tooltip>
                           ) : (
@@ -303,18 +280,22 @@ export function LeadPipelineBoard({
                           onClick={(e) => e.stopPropagation()}
                         >
                           {['new', 'contacted'].includes(col.key) ? (
-                            <Button type="primary" size="small" onClick={() => navigate(`/crm/leads/${lead.id}?contact=1`)}>Ghi nhận liên hệ</Button>
+                            <Tooltip title={contactBlocked}><span><Button type="primary" size="small" disabled={!!contactBlocked || movingLeadId !== null}
+                              onClick={() => navigate(`/crm/leads/${lead.id}?contact=1`)}>{LEAD_ACTIONS.contact}</Button></span></Tooltip>
                           ) : col.nextStage ? (
+                            <Tooltip title={leadTransitionBlockReason(lead, col.nextStage)}><span>
                             <Button
                               type="primary"
                               size="small"
                               icon={<ArrowRightOutlined />}
                               loading={movingLeadId === lead.id}
+                              disabled={!!leadTransitionBlockReason(lead, col.nextStage) || movingLeadId !== null}
                               className="text-xs"
                               onClick={() => handleMoveStage(lead.id, col.nextStage!)}
                             >
                               {col.nextLabel || 'Tiếp theo'}
                             </Button>
+                            </span></Tooltip>
                           ) : col.key === 'enrolled' ? (
                             <Button
                               type="primary"
@@ -328,7 +309,8 @@ export function LeadPipelineBoard({
                             <Tag color="red">Đã đóng</Tag>
                           )}
 
-                          <Dropdown disabled={col.key === 'enrolled'} menu={{ items: menuItems }} trigger={['click']}>
+                          <Tooltip title={col.key === 'enrolled' ? leadTransitionBlockReason(lead, 'new') : undefined}><span>
+                          <Dropdown disabled={col.key === 'enrolled' || movingLeadId !== null} menu={{ items: menuItems }} trigger={['click']}>
                             <Button
                               size="small"
                               type="text"
@@ -336,6 +318,7 @@ export function LeadPipelineBoard({
                               className="text-gray-500 hover:text-gray-800"
                             />
                           </Dropdown>
+                          </span></Tooltip>
                         </div>
                       </Card>
                     );

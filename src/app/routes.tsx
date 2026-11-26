@@ -1,4 +1,5 @@
-import { createBrowserRouter, Navigate } from 'react-router';
+import { createBrowserRouter, Navigate, useNavigate } from 'react-router';
+import { PageState } from '../shared/components/PageState';
 import { AdminLayout } from '../shared/components/AdminLayout';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
 import { LeadsListPage } from '../features/crm/LeadsListPage';
@@ -17,15 +18,25 @@ import { MySchedulePage } from '../features/lms/MySchedulePage';
 import { PaymentsPage } from '../features/finance/PaymentsPage';
 import { InvoicesPage } from '../features/finance/InvoicesPage';
 import { DebtsPage } from '../features/finance/DebtsPage';
-import { AIModelsPage } from '../features/ai/AIModelsPage';
 import { AIPredictionsPage } from '../features/ai/AIPredictionsPage';
-import { AIInsightsPage } from '../features/ai/AIInsightsPage';
-import { UsersPage } from '../features/settings/UsersPage';
 import { LoginPage } from '../features/auth/loginPage';
 import { ProtectedRoute } from '../shared/components/ProtectedRoute';
 import { RegisterPage } from '@/features/auth/registerPage';
 import { RoomsPage } from '@/features/lms/RoomPage';
 import { RoomDetailPage } from '@/features/lms/RoomDetailPage';
+import { EmailSettingsPage } from '../features/settings/EmailSettingsPage';
+
+function NotFoundPage() {
+  const navigate = useNavigate();
+  return <PageState title="Không tìm thấy trang" description="Liên kết không tồn tại hoặc đã thay đổi."
+    onBack={() => navigate('/dashboard', { replace: true })} backLabel="Về tổng quan" />;
+}
+
+function UnavailablePage() {
+  const navigate = useNavigate();
+  return <PageState title="Chức năng chưa được cung cấp" description="Vui lòng trở về tổng quan để tiếp tục làm việc."
+    onBack={() => navigate('/dashboard', { replace: true })} backLabel="Về tổng quan" />;
+}
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -53,11 +64,18 @@ export const router = createBrowserRouter([
             children: [
               { index: true, element: <Navigate to="/lms/classes" replace /> },
               {
-                element: <ProtectedRoute roles={['admin', 'teacher']} />,
+                element: <ProtectedRoute roles={['admin', 'sale', 'teacher']} />,
                 children: [
                   { path: 'students', element: <StudentsPage /> },
-                  { path: 'students/:id', element: <StudentDetailPage /> },
                 ],
+              },
+              {
+                element: <ProtectedRoute roles={['admin', 'sale', 'teacher', 'student']} />,
+                children: [{ path: 'students/:id', element: <StudentDetailPage /> }],
+              },
+              {
+                element: <ProtectedRoute roles={['student']} />,
+                children: [{ path: 'my-profile', element: <StudentDetailPage /> }],
               },
               {
                 element: <ProtectedRoute roles={['admin']} />,
@@ -94,8 +112,8 @@ export const router = createBrowserRouter([
               {
                 element: <ProtectedRoute roles={['admin']} />,
                 children: [
-                  { path: 'models', element: <AIModelsPage /> },
-                  { path: 'insights', element: <AIInsightsPage /> },
+                  { path: 'models', element: <UnavailablePage /> },
+                  { path: 'insights', element: <UnavailablePage /> },
                 ],
               },
               {
@@ -108,11 +126,12 @@ export const router = createBrowserRouter([
             path: 'settings',
             element: <ProtectedRoute roles={['admin']} />,
             children: [
-              { index: true, element: <Navigate to="/settings/users" replace /> },
-              { path: 'users', element: <UsersPage /> },
+              { index: true, element: <Navigate to="/settings/email" replace /> },
+              { path: 'email', element: <EmailSettingsPage /> },
+              { path: 'users', element: <UnavailablePage /> },
             ],
           },
-          { path: '*', element: <div>404</div> },
+          { path: '*', element: <NotFoundPage /> },
         ],
       },
     ],

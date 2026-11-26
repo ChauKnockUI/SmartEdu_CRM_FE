@@ -1,82 +1,110 @@
+import { detailDescriptions } from '../../shared/utils/detailLayout';
 import { useState, useEffect } from 'react';
-import { Card, Descriptions, Tag, Button, Table, Statistic, Row, Col, message } from 'antd';
+import { Alert, Card, Descriptions, Tag, Button, Table, Row } from 'antd';
+import { SummaryCard } from '../../shared/components/SummaryCard';
+import { PageState } from '../../shared/components/PageState';
+import { paginationProps } from '../../shared/utils/pagination';
 import { EditOutlined, TeamOutlined, BookOutlined, DollarOutlined } from '@ant-design/icons';
-import { useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import type { ColumnsType } from 'antd/es/table';
 import { useDetailNavigation } from '../../shared/hooks/useDetailNavigation';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { usePermissions } from '../../shared/hooks/usePermissions';
-import { courseService } from '@/services/api/course.service';
+import { courseService, type Course, type CourseClass } from '@/services/api/course.service';
+import { CourseFormModal } from './CoursesPage';
+import { getClassStatus } from './classFilters';
+import { useAuth } from '../../shared/contexts/AuthContext';
 
 export function CourseDetailPage() {
+  const { user } = useAuth();
   const { id } = useParams();
+  const navigate = useNavigate();
   const { openDetail, goBack } = useDetailNavigation();
   const { can } = usePermissions();
-  const [course, setCourse] = useState<any>(null);
-
-
-  const fetchCourse = async () => {
-    try {
-      const courseId = Number(id);
-      const res = await courseService.getById(courseId);
-      setCourse(res.data);
-
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchClasses = async () => {
-    try {
-      setLoadingClasses(true);
-
-      const res = await courseService.getClasses(Number(id));
-
-      setCourseClasses(res.data || []);
-    } catch (error: any) {
-      message.error(error.message);
-    } finally {
-      setLoadingClasses(false);
-    }
-  };
-
-  const [courseClasses, setCourseClasses] = useState<any[]>([]);
-  const [loadingClasses, setLoadingClasses] = useState(false);
+  const [course, setCourse] = useState<Course | null>(null);
+  const [loadingCourse, setLoadingCourse] = useState(true);
+  const [courseError, setCourseError] = useState('');
+  const [courseReload, setCourseReload] = useState(0);
+  const [isEditing, setIsEditing] = useState(false);
+  const [courseClasses, setCourseClasses] = useState<CourseClass[]>([]);
+  const [loadingClasses, setLoadingClasses] = useState(true);
+  const [classesError, setClassesError] = useState('');
+  const [classesReload, setClassesReload] = useState(0);
+  const [totalStudents, setTotalStudents] = useState<number | null>(null);
 
   useEffect(() => {
-    if (id) {
-      fetchCourse();
-      fetchClasses();
+    const controller = new AbortController();
+    let current = true;
+    setCourse(null);
+    setIsEditing(false);
+    setCourseError('');
+    setLoadingCourse(true);
+    const courseId = Number(id);
+    if (!Number.isInteger(courseId) || courseId <= 0) {
+      setCourseError('ID khóa học không hợp lệ');
+      setLoadingCourse(false);
+      return;
     }
-  }, [id]);
+    courseService.getById(courseId, controller.signal)
+      .then(res => { if (current) setCourse(res.data); })
+      .catch(err => {
+        if (current) setCourseError(err instanceof Error ? err.message : 'Lỗi tải khóa học');
+      })
+      .finally(() => { if (current) setLoadingCourse(false); });
+    return () => { current = false; controller.abort(); };
+  }, [id, courseReload, user?.id, user?.role]);
 
-  if (!course) {
-    return (
-      <div className="text-center p-8">
-        <h2 className="text-xl font-semibold">Không tìm thấy khóa học</h2>
-        <Button type="primary" onClick={() => goBack()} className="mt-4">
-          Quay lại
-        </Button>
-      </div>
-    );
+  useEffect(() => {
+    const controller = new AbortController();
+    let current = true;
+    setCourseClasses([]);
+    setTotalStudents(null);
+    setClassesError('');
+    setLoadingClasses(true);
+    const courseId = Number(id);
+    if (!Number.isInteger(courseId) || courseId <= 0) {
+      setLoadingClasses(false);
+      return;
+    }
+    courseService.getClasses(courseId, controller.signal)
+      .then(res => {
+        if (!current) return;
+        setCourseClasses(res.data);
+        const count = res.summary?.total_students;
+        if (typeof count === 'number' && Number.isInteger(count) && count >= 0) setTotalStudents(count);
+      })
+      .catch(err => {
+        if (current) setClassesError(err instanceof Error ? err.message : 'Lỗi tải danh sách lớp');
+      })
+      .finally(() => { if (current) setLoadingClasses(false); });
+    return () => { current = false; controller.abort(); };
+  }, [id, classesReload, user?.id, user?.role]);
+
+  if (loadingCourse || (course && course.id !== Number(id))) {
+    return <PageState loading title="Đang tải khóa học..." />;
   }
 
-  const handleViewClass = (classId: string) => {
+  if (!course) {
+    return <PageState title="Không tải được khóa học" description={courseError || 'Khóa học không tồn tại hoặc không thuộc phạm vi được xem.'}
+      onRetry={() => setCourseReload(value => value + 1)} onBack={goBack} />;
+  }
+
+  const handleViewClass = (classId: number) => {
     openDetail(`/lms/classes/${classId}`);
   };
-  const totalStudents = 0;
+  const hasClassStats = !loadingClasses && !classesError;
 
   const activeClasses = courseClasses.filter(
     c => c.status === 'ongoing' || c.status === 'upcoming'
   ).length;
 
-  const classColumns: ColumnsType<any> = [
+  const classColumns: ColumnsType<CourseClass> = [
     {
       title: 'Mã lớp',
-      dataIndex: 'code',
-      key: 'code',
+      dataIndex: 'id',
+      key: 'id',
       width: 150,
-      render: (code: string) => <span className="font-semibold text-blue-600">{code}</span>,
+      render: (id: number) => <span className="font-semibold text-blue-600">#{id}</span>,
     },
     {
       title: 'Tên lớp',
@@ -98,13 +126,13 @@ export function CourseDetailPage() {
       render: (_, record) => (
         <div className="text-sm">
           <div>
-            {new Date(record.start_date).toLocaleDateString('vi-VN')}
+            {record.start_date ? new Date(record.start_date).toLocaleDateString('vi-VN', { timeZone: 'UTC' }) : '—'}
           </div>
 
           <div className="text-gray-500">
             đến {
               record.end_date
-                ? new Date(record.end_date).toLocaleDateString('vi-VN')
+                ? new Date(record.end_date).toLocaleDateString('vi-VN', { timeZone: 'UTC' })
                 : '—'
             }
           </div>
@@ -116,7 +144,7 @@ export function CourseDetailPage() {
       key: 'students',
       width: 100,
       render: (_, record) => {
-        return `${record._count?.classEnrollments || 0}/${record.max_students || 0}`;
+        return `${record._count?.classEnrollments ?? '—'}/${record.max_students ?? '—'}`;
       },
     },
     {
@@ -125,17 +153,8 @@ export function CourseDetailPage() {
       key: 'status',
       width: 130,
       render: (status: string) => {
-        const colorMap = {
-          upcoming: 'blue',
-          ongoing: 'green',
-          completed: 'default',
-        };
-        const labelMap = {
-          upcoming: 'Sắp mở',
-          ongoing: 'Đang học',
-          completed: 'Hoàn thành',
-        };
-        return <Tag color={colorMap[status as keyof typeof colorMap]}>{labelMap[status as keyof typeof labelMap]}</Tag>;
+        const meta = getClassStatus(status);
+        return <Tag color={meta.color}>{meta.label}</Tag>;
       },
     },
     {
@@ -154,13 +173,13 @@ export function CourseDetailPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title={course.name}
         actions={
           <>
             {can('courses', 'write') && (
-              <Button icon={<EditOutlined />}>
+              <Button icon={<EditOutlined />} onClick={() => setIsEditing(true)}>
                 Chỉnh sửa
               </Button>
             )}
@@ -170,46 +189,16 @@ export function CourseDetailPage() {
 
       <div className="space-y-4">
         {/* Overview Statistics */}
-        <Card>
-          <Row gutter={16}>
-            <Col span={6}>
-              <Statistic
-                title="Tổng số lớp"
-                value={courseClasses.length}
-                prefix={<BookOutlined />}
-                valueStyle={{ color: '#1890ff' }}
-              />
-            </Col>
-            <Col span={6}>
-              <Statistic
-                title="Lớp đang hoạt động"
-                value={activeClasses}
-                prefix={<BookOutlined />}
-                valueStyle={{ color: '#52c41a' }}
-              />
-            </Col>
-            <Col span={6}>
-              <Statistic
-                title="Tổng học viên"
-                value={totalStudents}
-                prefix={<TeamOutlined />}
-              />
-            </Col>
-            <Col span={6}>
-              <Statistic
-                title="Học phí"
-                value={Number(course.fee || 0)}
-                prefix={<DollarOutlined />}
-                suffix="đ"
-                valueStyle={{ color: '#cf1322' }}
-              />
-            </Col>
-          </Row>
-        </Card>
+        <Row className="crm-summary-grid" gutter={[16, 16]}>
+          <SummaryCard title="Tổng số lớp" value={hasClassStats ? courseClasses.length : null} prefix={<BookOutlined />} caption="Trong phạm vi được xem" />
+          <SummaryCard title="Lớp đang hoạt động" value={hasClassStats ? activeClasses : null} prefix={<BookOutlined />} caption="Đang học và sắp mở" />
+          <SummaryCard title={user?.role === 'admin' ? 'Học viên đang ghi danh' : 'Học viên trong phạm vi'} value={hasClassStats ? totalStudents : null} prefix={<TeamOutlined />} caption="Không cộng trùng học viên" />
+          <SummaryCard title="Học phí" value={Number(course.fee || 0)} prefix={<DollarOutlined />} currency caption="Theo cấu hình khóa học" />
+        </Row>
 
         {/* Course Information */}
         <Card title="Thông tin khóa học">
-          <Descriptions column={2} bordered>
+          <Descriptions {...detailDescriptions}>
             <Descriptions.Item label="Mã khóa học">
               <span className="font-semibold">{course.id}</span>
             </Descriptions.Item>
@@ -219,7 +208,10 @@ export function CourseDetailPage() {
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="Thời lượng">
-              {course.duration_weeks} tuần
+              {course.duration_weeks ? `${course.duration_weeks} tuần` : 'Chưa có'}
+            </Descriptions.Item>
+            <Descriptions.Item label="Số buổi">
+              {course.total_sessions ?? 'Chưa có'}
             </Descriptions.Item>
             <Descriptions.Item label="Học phí">
               <span className="font-semibold text-green-600">
@@ -233,7 +225,7 @@ export function CourseDetailPage() {
               {course.updatedAt && new Date(course.updatedAt).toLocaleDateString('vi-VN')}
             </Descriptions.Item>
             {course.description && (
-              <Descriptions.Item label="Mô tả" span={2}>
+              <Descriptions.Item label="Mô tả" span="filled">
                 {course.description}
               </Descriptions.Item>
             )}
@@ -242,22 +234,55 @@ export function CourseDetailPage() {
 
         {/* Classes List */}
         <Card
-          title={`Danh sách lớp học (${courseClasses.length})`}
+          title={`Danh sách lớp học (${hasClassStats ? courseClasses.length : '—'})`}
           extra={
-            can('courses', 'write') ? (
-              <Button type="primary">Tạo lớp mới</Button>
+            user?.role === 'admin' && course.is_active ? (
+              <Button
+                type="primary"
+                onClick={() => navigate(`/lms/classes?course_id=${course.id}&create=1`)}
+              >Tạo lớp mới</Button>
             ) : undefined
           }
         >
+          {classesError && (
+            <Alert
+              type="error"
+              showIcon
+              title={classesError}
+              className="mb-4"
+              action={<Button onClick={() => setClassesReload(value => value + 1)}>Thử lại</Button>}
+            />
+          )}
+          {hasClassStats && totalStudents === null && (
+            <Alert
+              type="warning"
+              showIcon
+              title="Chưa tải được tổng học viên của khóa học"
+              className="mb-4"
+              action={<Button onClick={() => setClassesReload(value => value + 1)}>Thử lại</Button>}
+            />
+          )}
           <Table
             columns={classColumns}
             dataSource={courseClasses}
             loading={loadingClasses}
             rowKey="id"
-            pagination={false}
+            scroll={{ x: 950 }}
+            pagination={paginationProps('lớp học', { defaultPageSize: 10 })}
           />
         </Card>
       </div>
+      {isEditing && can('courses', 'write') && (
+        <CourseFormModal
+          key={course.id}
+          course={course}
+          onCancel={() => setIsEditing(false)}
+          onSaved={(updated) => {
+            setCourse(updated);
+            setIsEditing(false);
+          }}
+        />
+      )}
     </div>
   );
 }

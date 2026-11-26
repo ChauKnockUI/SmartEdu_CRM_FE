@@ -1,4 +1,5 @@
 export type SupportLevel = 'low' | 'medium' | 'high';
+export const studentRiskLink = (studentId: number, classId: number) => `/lms/students/${studentId}?tab=classes&risk_class=${classId}`;
 export interface DropoutRiskView {
   risk_score?: number | null;
   risk_level?: SupportLevel | null;

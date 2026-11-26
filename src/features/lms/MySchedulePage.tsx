@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -7,9 +7,9 @@ import {
   Card,
   message,
   Modal,
+  Row,
   Select,
   Space,
-  Spin,
   Table,
   Tag,
 } from 'antd';
@@ -28,6 +28,10 @@ import { classService } from '../../services/api/class.service';
 import { scheduleService } from '../../services/api/schedule.service';
 import dayjs from 'dayjs';
 import 'dayjs/locale/vi';
+import { getSessionStatus, SessionAttendanceTag, SessionStatusTag, type SessionChangeState } from './sessionStatus';
+import { getClassStatus } from './classFilters';
+import { PageState } from '../../shared/components/PageState';
+import { SummaryCard } from '../../shared/components/SummaryCard';
 
 dayjs.locale('vi');
 
@@ -55,6 +59,7 @@ interface MySession {
   endTime?: string | Date | null;
   room?: string;
   status: string;
+  scheduleChange?: SessionChangeState;
   attendances?: any[];
 }
 
@@ -205,46 +210,17 @@ export const formatClassSchedule = (classItem: any) => {
   return { daysText, timeText };
 };
 
-const CLASS_STATUS_CONFIG: Record<
-  string,
-  { label: string; color: string }
-> = {
-  upcoming: { label: 'Sắp khai giảng', color: 'processing' },
-  ongoing: { label: 'Đang diễn ra', color: 'success' },
-  active: { label: 'Đang diễn ra', color: 'success' },
-  completed: { label: 'Đã kết thúc', color: 'default' },
-  cancelled: { label: 'Đã hủy', color: 'error' },
-  paused: { label: 'Tạm dừng', color: 'warning' },
-};
-
-const computeClassStatus = (cls: MyClass): string => {
-  // Nếu đã bị hủy thủ công thì ưu tiên giữ nguyên
-  if (cls.status === 'cancelled') return 'cancelled';
-
-  const today = dayjs().startOf('day');
-  const startDate = cls.start_date ? dayjs(cls.start_date).startOf('day') : null;
-  const endDate = cls.end_date ? dayjs(cls.end_date).endOf('day') : null;
-
-  if (startDate && startDate.isValid()) {
-    if (today.isBefore(startDate)) {
-      return 'upcoming'; // Chưa tới ngày khai giảng
-    }
-    if (endDate && endDate.isValid() && today.isAfter(endDate)) {
-      return 'completed'; // Đã qua ngày kết thúc
-    }
-    return 'ongoing'; // Đã tới/qua ngày khai giảng -> Đang diễn ra
-  }
-
-  return cls.status || 'ongoing';
-};
-
 export function MySchedulePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const role = user?.role;
+  const scope = `${user?.id}:${role}`;
+  const currentScope = useRef(scope); currentScope.current = scope;
+  const requestId = useRef(0);
 
   const [viewType, setViewType] = useState<ViewType>('list');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(''), [owner, setOwner] = useState('');
   const [classes, setClasses] = useState<MyClass[]>([]);
   const [sessions, setSessions] = useState<MySession[]>([]);
   const [selectedDate, setSelectedDate] = useState(dayjs());
@@ -255,20 +231,19 @@ export function MySchedulePage() {
   const isStudent = role === 'student';
 
   useEffect(() => {
+    setDayDetailVisible(false); setSelectedDaySessions([]);
     fetchMyScheduleData();
-  }, []);
+    return () => { requestId.current++; };
+  }, [scope]);
 
   const fetchMyScheduleData = async () => {
+    const request = ++requestId.current, context = currentScope.current;
     try {
-      setLoading(true);
+      setLoading(true); setLoadError('');
 
       const [classRes, scheduleRes] = await Promise.all([
-        classService.getMyClasses
-          ? classService.getMyClasses()
-          : classService.getAll({ limit: 100 }),
-        scheduleService.getMySchedules
-          ? scheduleService.getMySchedules()
-          : scheduleService.getAll(),
+        classService.getMyClasses(),
+        scheduleService.getMySchedules(),
       ]);
 
       const classList = getArrayData(classRes).map((item: any) => ({
@@ -281,18 +256,15 @@ export function MySchedulePage() {
         schedule: item.schedule,
         room: item.room?.name || item.room_name || item.room || '-',
         students:
-          item.students_count ||
-          item.student_count ||
-          item.classEnrollments?.length ||
-          item.enrollments?.length ||
+          item._count?.classEnrollments ?? item.students_count ??
+          item.student_count ??
+          item.classEnrollments?.filter((entry: any) => entry.status === 'active').length ??
+          item.enrollments?.filter((entry: any) => entry.status === 'active').length ??
           0,
         status: item.status,
       }));
 
       const sessionList = getArrayData(scheduleRes).map((item: any) => {
-        const hasAttendance =
-          Array.isArray(item.attendances) && item.attendances.length > 0;
-
         return {
           id: item.id,
           classId: item.class_id || item.classId || item.class?.id,
@@ -301,29 +273,33 @@ export function MySchedulePage() {
           startTime: item.start_time || item.startTime,
           endTime: item.end_time || item.endTime,
           room: item.room?.name || item.room_name || item.room || '-',
-          status: hasAttendance ? 'attended' : item.status || 'scheduled',
+          status: item.status || 'scheduled',
+          scheduleChange: item.scheduleChange,
           attendances: item.attendances || [],
         };
       });
 
-      setClasses(classList);
+      if (request !== requestId.current || context !== currentScope.current) return;
+      setOwner(context); setClasses(classList);
       setSessions(sessionList);
     } catch (error: any) {
-      message.error(error.message || 'Lỗi tải lịch học');
+      if (request === requestId.current && context === currentScope.current) {
+        setOwner(context); setClasses([]); setSessions([]); setLoadError(error.message || 'Không tải được lịch học.');
+      }
     } finally {
-      setLoading(false);
+      if (request === requestId.current && context === currentScope.current) setLoading(false);
     }
   };
 
   const todaySessions = useMemo(() => {
-    return sessions.filter((session) => dayjs(session.date).isSame(dayjs(), 'day'));
+    return sessions.filter((session) => session.status !== 'cancelled' && dayjs(session.date).isSame(dayjs(), 'day'));
   }, [sessions]);
 
   const upcomingSessions = useMemo(() => {
     return sessions
       .filter((session) => {
         const sessionDate = dayjs(session.date);
-        return sessionDate.isSame(dayjs(), 'day') || sessionDate.isAfter(dayjs(), 'day');
+        return session.status !== 'cancelled' && (sessionDate.isSame(dayjs(), 'day') || sessionDate.isAfter(dayjs(), 'day'));
       })
       .sort((a, b) => dayjs(a.date).valueOf() - dayjs(b.date).valueOf());
   }, [sessions]);
@@ -332,7 +308,7 @@ export function MySchedulePage() {
 
   const weeklyHours = useMemo(() => {
     return sessions
-      .filter((session) => dayjs(session.date).isSame(dayjs(), 'week'))
+      .filter((session) => session.status !== 'cancelled' && dayjs(session.date).isSame(dayjs(), 'week'))
       .reduce((total, session) => {
         const start = dayjs(session.startTime);
         const end = dayjs(session.endTime);
@@ -347,11 +323,10 @@ export function MySchedulePage() {
     return sessions
       .filter((session) => dayjs(session.date).isSame(value, 'day'))
       .map((session) => ({
-        type:
-          session.status === 'attended' || session.status === 'completed'
-            ? 'success'
-            : 'processing',
-        content: `${formatTime(session.startTime)} - ${session.className}`,
+        type: session.status === 'cancelled' || (isStudent && session.attendances?.[0]?.status === 'absent') ? 'error'
+          : isStudent && session.attendances?.[0]?.status === 'late' ? 'warning' : session.attendances?.length ? 'success' : 'processing',
+        content: `${formatTime(session.startTime)} - ${session.className}${session.status === 'cancelled' || session.scheduleChange?.isMakeup || session.scheduleChange?.pendingMakeup
+          ? ` (${getSessionStatus(session.status, session.scheduleChange).label})` : ''}`,
       }));
   };
 
@@ -395,21 +370,10 @@ export function MySchedulePage() {
     navigate(`/lms/sessions/${sessionId}`);
   };
 
-  const renderSessionStatus = (status: string) => {
-    if (status === 'attended') {
-      return <Tag color="success">Đã điểm danh</Tag>;
-    }
-
-    if (status === 'completed') {
-      return <Tag color="cyan">Đã hoàn thành</Tag>;
-    }
-
-    if (status === 'cancelled') {
-      return <Tag color="error">Đã hủy</Tag>;
-    }
-
-    return <Tag color="processing">Chưa điểm danh</Tag>;
-  };
+  const renderSessionStatus = (session: MySession) => <Space size={0} wrap>
+    <SessionStatusTag status={session.status} scheduleChange={session.scheduleChange} />
+    <SessionAttendanceTag status={session.status} attendances={session.attendances} personal={isStudent} />
+  </Space>;
 
   const classColumns: ColumnsType<MyClass> = [
     {
@@ -478,11 +442,7 @@ export function MySchedulePage() {
       title: 'Trạng thái',
       key: 'status',
       render: (_, record) => {
-        const actualStatus = computeClassStatus(record);
-        const config = CLASS_STATUS_CONFIG[actualStatus] || {
-          label: 'Đang diễn ra',
-          color: 'success',
-        };
+        const config = getClassStatus(record.status || '');
         return <Tag color={config.color}>{config.label}</Tag>;
       },
     },
@@ -503,7 +463,9 @@ export function MySchedulePage() {
       dataIndex: 'className',
       key: 'className',
       render: (className: string, record) => (
-        <Button type="link" onClick={() => openClassDetail(record.classId)}>
+        <Button type="link" disabled={isTeacher && !classes.some(item => item.id === record.classId)}
+          title="Quyền xem chi tiết lớp theo phân công hiện tại; bạn vẫn xem được buổi học đã phụ trách."
+          onClick={() => openClassDetail(record.classId)}>
           {className}
         </Button>
       ),
@@ -556,14 +518,14 @@ export function MySchedulePage() {
       title: 'Trạng thái',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => renderSessionStatus(status),
+      render: (_: string, record) => renderSessionStatus(record),
     },
     {
       title: 'Thao tác',
       key: 'action',
       render: (_, record) => (
         <Space size="small">
-          {isTeacher && (
+          {isTeacher && record.status !== 'cancelled' && (
             <Button
               type="primary"
               size="small"
@@ -582,16 +544,12 @@ export function MySchedulePage() {
     },
   ];
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <Spin size="large" />
-      </div>
-    );
-  }
+  if (loading || owner !== scope || loadError) return <PageState loading={loading || owner !== scope}
+    title={loading || owner !== scope ? 'Đang tải lịch...' : 'Không tải được lịch'} description={loadError}
+    onRetry={fetchMyScheduleData} onBack={() => navigate('/dashboard')} />;
 
   return (
-    <div>
+    <div className="crm-page crm-schedule-page">
       <PageHeader
         title={isTeacher ? 'Lịch dạy của tôi' : 'Lịch học của tôi'}
         breadcrumbs={[
@@ -622,13 +580,13 @@ export function MySchedulePage() {
               <div className="font-medium text-blue-900 mb-2">Có {todaySessions.length} buổi học hôm nay:</div>
               <div className="mt-2 space-y-1.5">
                 {todaySessions.map((session) => (
-                  <div key={session.id} className="flex items-center gap-2 text-sm">
+                  <div key={session.id} className="flex flex-wrap items-center gap-2 text-sm">
                     <Tag color="blue" className="font-mono">
                       {formatTime(session.startTime)} - {formatTime(session.endTime)}
                     </Tag>
                     <span className="font-medium text-gray-800">{session.className}</span>
                     <span className="text-gray-500">({session.room || 'Chưa xếp phòng'})</span>
-                    {renderSessionStatus(session.status)}
+                    {renderSessionStatus(session)}
                   </div>
                 ))}
               </div>
@@ -657,56 +615,22 @@ export function MySchedulePage() {
         className="mb-6 shadow-sm border-blue-200"
       />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-blue-600">{classes.length}</div>
-            <div className="text-gray-600 mt-1">
-              {isTeacher ? 'Lớp đang dạy' : 'Lớp đang học'}
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-green-600">
-              {upcomingSessions.length}
-            </div>
-            <div className="text-gray-600 mt-1">Buổi sắp tới</div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-orange-600">
-              {Math.round(weeklyHours)}h
-            </div>
-            <div className="text-gray-600 mt-1">
-              {isTeacher ? 'Giờ dạy tuần này' : 'Giờ học tuần này'}
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <div className="text-center">
-            <div className="text-2xl font-bold text-purple-600">
-              {isTeacher
-                ? classes.reduce((total, item) => total + (item.students || 0), 0)
-                : sessions.filter((item) => item.status === 'completed').length}
-            </div>
-            <div className="text-gray-600 mt-1">
-              {isTeacher ? 'Tổng học viên' : 'Buổi đã học'}
-            </div>
-          </div>
-        </Card>
-      </div>
-
+      <Row className="crm-summary-grid" gutter={[16, 16]}>
+        <SummaryCard title={isTeacher ? 'Lớp phụ trách' : 'Lớp đang học'} value={classes.length} prefix={<CalendarOutlined />} caption="Trong danh sách lớp của bạn" />
+        <SummaryCard title="Buổi sắp tới" value={upcomingSessions.length} prefix={<ClockCircleOutlined />} caption="Theo lịch còn lại" />
+        <SummaryCard title={isTeacher ? 'Giờ dạy tuần này' : 'Giờ học tuần này'} value={Math.round(weeklyHours)} prefix={<ClockCircleOutlined />} suffix="h" caption="Theo lịch trong tuần" />
+        <SummaryCard title={isTeacher ? 'Lượt ghi danh' : 'Buổi đã tham gia'} prefix={<CheckCircleOutlined />}
+          value={isTeacher ? classes.reduce((total, item) => total + (item.students || 0), 0)
+            : sessions.filter(item => item.status !== 'cancelled' && item.attendances?.some(att => ['present', 'late'].includes(att.status))).length}
+          caption={isTeacher ? 'Tính theo từng lớp' : 'Có mặt và đi muộn'} />
+      </Row>
       {viewType === 'list' ? (
         <div className="space-y-6">
           <Card title={isTeacher ? 'Lớp đang dạy' : 'Lớp đang học'}>
             <Table
               dataSource={classes}
               rowKey="id"
+              scroll={{ x: 850 }}
               pagination={false}
               columns={classColumns}
               locale={{
@@ -721,6 +645,7 @@ export function MySchedulePage() {
             <Table
               dataSource={upcomingSessions}
               rowKey="id"
+              scroll={{ x: 750 }}
               pagination={false}
               columns={sessionColumns}
               locale={{ emptyText: 'Chưa có buổi học sắp tới' }}
@@ -763,12 +688,12 @@ export function MySchedulePage() {
                       <span>{session.room || '-'}</span>
                     </Space>
 
-                    {renderSessionStatus(session.status)}
+                    {renderSessionStatus(session)}
                   </Space>
                 </div>
 
                 <Space>
-                  {isTeacher && (
+                  {isTeacher && session.status !== 'cancelled' && (
                     <Button
                       type="primary"
                       icon={<CheckCircleOutlined />}
@@ -791,6 +716,7 @@ export function MySchedulePage() {
                   </Button>
 
                   <Button
+                    disabled={isTeacher && !classes.some(item => item.id === session.classId)}
                     onClick={() => {
                       setDayDetailVisible(false);
                       openClassDetail(session.classId);

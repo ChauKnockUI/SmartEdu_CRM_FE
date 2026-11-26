@@ -1,3 +1,4 @@
+import { apiFetch } from './listCache';
 import type {
   PaginatedResponse,
   ApiError,
@@ -81,7 +82,7 @@ export class ApiClient {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeout);
 
-      const response = await fetch(url, {
+      const response = await apiFetch(url, {
         method,
         headers: requestHeaders,
         body: body ? JSON.stringify(body) : undefined,

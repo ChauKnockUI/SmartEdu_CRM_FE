@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Avatar, Badge, Button, Dropdown, Empty, Input, Layout, Menu, type MenuProps } from 'antd';
+import { useState, useEffect, useRef } from 'react';
+import { Avatar, Badge, Button, Descriptions, Dropdown, Empty, Layout, Menu, Modal, Spin, message, type MenuProps } from 'antd';
 import {
   BellOutlined,
   BookOutlined,
@@ -14,8 +14,8 @@ import {
   QuestionCircleOutlined,
   ReadOutlined,
   RobotOutlined,
-  SearchOutlined,
   SettingOutlined,
+  MailOutlined,
   SwapOutlined,
   TeamOutlined,
   UserOutlined,
@@ -36,7 +36,36 @@ dayjs.extend(relativeTime);
 dayjs.locale('vi');
 
 const { Header, Sider, Content } = Layout;
+const roleLabels = { admin: 'Quản trị viên', sale: 'Sale', teacher: 'Giảng viên', student: 'Học viên' };
 type MenuItem = Required<MenuProps>['items'][number];
+
+type MarkTarget = number | 'all';
+interface NotificationState {
+  scope: string;
+  items: NotificationItem[];
+  unread: number;
+  loading: boolean;
+  error: string;
+  markError: { target: MarkTarget; message: string } | null;
+  pending: MarkTarget[];
+  open: boolean;
+}
+
+const emptyNotifications = (scope: string): NotificationState => ({
+  scope, items: [], unread: 0, loading: !!scope, error: '', markError: null, pending: [], open: false,
+});
+
+// Only app paths are navigable, including when a mark request fails.
+function internalNotificationLink(link?: string | null): string | null {
+  if (!link || !/^\/(?!\/)/.test(link) || /[\\\s\u0000-\u001f\u007f]/.test(link)) return null;
+  try {
+    const url = new URL(link, window.location.origin);
+    return url.origin === window.location.origin && /^\/(?!\/)/.test(url.pathname)
+      ? `${url.pathname}${url.search}${url.hash}` : null;
+  } catch {
+    return null;
+  }
+}
 
 function getItem(label: string, key: string, icon?: React.ReactNode, children?: MenuItem[]): MenuItem {
   return { key, icon, children, label } as MenuItem;
@@ -47,12 +76,13 @@ function leafMenuKeys(items: MenuItem[]): string[] {
     ? leafMenuKeys(item.children as MenuItem[]) : item.key ? [String(item.key)] : []);
 }
 
-function getMenuItemsForRole(role: UserRole): MenuItem[] {
+export function getMenuItemsForRole(role: UserRole): MenuItem[] {
   if (role === 'sale') {
     return [
-      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
+      getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
       getItem('CRM', '/crm', <CustomerServiceOutlined />, [
-        getItem('Quản lý leads', '/crm/leads', <UserOutlined />),
+        getItem('Quản lý lead', '/crm/leads', <UserOutlined />),
+        getItem('Học viên phụ trách', '/lms/students', <TeamOutlined />),
       ]),
       getItem('Tài chính', '/finance', <DollarOutlined />, [
         getItem('Khoản phải thu', '/finance/invoices', <DollarOutlined />),
@@ -64,31 +94,33 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
 
   if (role === 'teacher') {
     return [
-      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-      getItem('LMS', '/lms', <BookOutlined />, [
+      getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
+      getItem('Đào tạo', '/lms', <BookOutlined />, [
         getItem('Lịch dạy', '/lms/myschedule', <CalendarOutlined />),
         getItem('Lớp học', '/lms/classes', <BookOutlined />),
+        getItem('Học viên trong lớp', '/lms/students', <TeamOutlined />),
       ]),
-      getItem('Dropout Risk', '/ai/predictions', <RobotOutlined />),
+      getItem('Cảnh báo bỏ học', '/ai/predictions', <RobotOutlined />),
     ];
   }
 
   if (role === 'student') {
     return [
-      getItem('Dashboard', '/dashboard', <DashboardOutlined />),
-      getItem('LMS', '/lms', <BookOutlined />, [
+      getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
+      getItem('Đào tạo', '/lms', <BookOutlined />, [
         getItem('Lịch học của tôi', '/lms/myschedule', <CalendarOutlined />),
         getItem('Lớp học của tôi', '/lms/classes', <BookOutlined />),
+        getItem('Hồ sơ của tôi', '/lms/my-profile', <UserOutlined />),
       ]),
     ];
   }
 
   return [
-    getItem('Dashboard', '/dashboard', <DashboardOutlined />),
+    getItem('Tổng quan', '/dashboard', <DashboardOutlined />),
     getItem('CRM', '/crm', <CustomerServiceOutlined />, [
-      getItem('Quản lý leads', '/crm/leads', <UserOutlined />),
+      getItem('Quản lý lead', '/crm/leads', <UserOutlined />),
     ]),
-    getItem('LMS', '/lms', <BookOutlined />, [
+    getItem('Đào tạo', '/lms', <BookOutlined />, [
       getItem('Học viên', '/lms/students', <TeamOutlined />),
       getItem('Giảng viên', '/lms/teachers', <ReadOutlined />),
       getItem('Khóa học', '/lms/courses', <ReadOutlined />),
@@ -102,25 +134,30 @@ function getMenuItemsForRole(role: UserRole): MenuItem[] {
       getItem('Thanh toán', '/finance/payments', <DollarOutlined />),
       getItem('Công nợ', '/finance/debts', <DollarOutlined />),
     ]),
-    getItem('AI & Insights', '/ai', <RobotOutlined />, [
-      getItem('Models', '/ai/models', <RobotOutlined />),
-      getItem('Dropout Risk', '/ai/predictions', <DashboardOutlined />),
-      getItem('Demo Insights', '/ai/insights', <DashboardOutlined />),
-    ]),
-    getItem('Cài đặt', '/settings', <SettingOutlined />, [
-      getItem('Người dùng', '/settings/users', <TeamOutlined />),
+    getItem('Cảnh báo bỏ học', '/ai/predictions', <RobotOutlined />),
+    getItem('Cài đặt trung tâm', '/settings', <SettingOutlined />, [
+      getItem('Email chăm sóc', '/settings/email', <MailOutlined />),
     ]),
   ];
 }
 
 export function AdminLayout() {
   const [collapsed, setCollapsed] = useState(false);
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    if (!mobile || collapsed) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setCollapsed(true); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [mobile, collapsed]);
   const [guideVisible, setGuideVisible] = useState(false);
+  const [accountVisible, setAccountVisible] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
   const menuItems = getMenuItemsForRole(user?.role || 'admin');
-  const selectedMenuKey = activeMenuKey(location.pathname, leafMenuKeys(menuItems), (location.state as NavigationContext | null)?.menuKey);
+  const selectedMenuKey = user?.role === 'student' && /^\/lms\/students\/[^/]+\/?$/.test(location.pathname)
+    ? '/lms/my-profile' : activeMenuKey(location.pathname, leafMenuKeys(menuItems), (location.state as NavigationContext | null)?.menuKey);
   const [openMenuKeys, setOpenMenuKeys] = useState<string[]>([]);
   useEffect(() => {
     const parent = menuItems.find(item => item && 'children' in item
@@ -134,64 +171,132 @@ export function AdminLayout() {
   };
 
   const userMenuItems: MenuProps['items'] = [
-    { key: 'profile', icon: <UserOutlined />, label: 'Thông tin tài khoản' },
-    { key: 'settings', icon: <SettingOutlined />, label: 'Cài đặt' },
+    { key: 'account', icon: <UserOutlined />, label: 'Thông tin tài khoản', onClick: () => setAccountVisible(true) },
+    ...(user?.role === 'student' ? [{ key: 'profile', icon: <ReadOutlined />, label: 'Hồ sơ của tôi',
+      onClick: () => navigate('/lms/my-profile') }] : []),
     { key: 'divider-1', type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: 'Đăng xuất', danger: true, onClick: handleLogout },
   ];
 
-  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [, setLoadingNotifs] = useState(false);
-  const [notifOpen, setNotifOpen] = useState(false);
-
-  const fetchNotifications = async () => {
-    try {
-      setLoadingNotifs(true);
-      const res = await notificationService.getMyNotifications();
-      if (res.success) {
-        setNotifications(res.data || []);
-        setUnreadCount(res.unread_count || 0);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingNotifs(false);
-    }
-  };
+  const notificationScope = user && token ? JSON.stringify([user.id, user.role, token]) : '';
+  const currentNotificationScope = useRef(notificationScope);
+  currentNotificationScope.current = notificationScope;
+  const notificationRequest = useRef(0);
+  const notificationActions = useRef<{
+    scope: string;
+    refresh: () => void;
+    mark: (target: MarkTarget) => void;
+  } | null>(null);
+  const [notificationState, setNotificationState] = useState(() => emptyNotifications(''));
+  // Hide the previous actor's data during render, before effect cleanup runs.
+  const visibleNotifications = notificationState.scope === notificationScope
+    ? notificationState : emptyNotifications(notificationScope);
+  const { items: notifications, unread: unreadCount, loading: loadingNotifs,
+    error: notifError, markError, pending: pendingMarks, open: notifOpen } = visibleNotifications;
 
   useEffect(() => {
-    if (user) {
-      fetchNotifications();
-      const interval = setInterval(fetchNotifications, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [user]);
+    setNotificationState(emptyNotifications(notificationScope));
+    if (!notificationScope || !token) return;
+    const controller = new AbortController();
+    const options = { token, signal: controller.signal };
+    const isCurrent = () => !controller.signal.aborted && currentNotificationScope.current === notificationScope;
+    const update = (change: (previous: NotificationState) => NotificationState) => {
+      if (isCurrent()) setNotificationState(previous =>
+        isCurrent() && previous.scope === notificationScope ? change(previous) : previous);
+    };
+    // One queue per actor/token: polls never overlap marks or overwrite their result.
+    let queue = Promise.resolve();
+    const enqueue = (operation: () => Promise<void>) => {
+      queue = queue.then(async () => { if (isCurrent()) await operation(); });
+    };
+    let refreshQueued = false;
+    let refreshVersion = 0;
+    const pending = new Set<MarkTarget>();
+    const refresh = () => {
+      if (!isCurrent()) return;
+      refreshVersion++;
+      if (refreshQueued) return;
+      refreshQueued = true;
+      enqueue(async () => {
+        const version = refreshVersion;
+        const request = ++notificationRequest.current;
+        update(previous => ({ ...previous, loading: true, error: '' }));
+        try {
+          const res = await notificationService.getMyNotifications(30, options);
+          if (request === notificationRequest.current) update(previous => ({
+            ...previous, items: res.data || [], unread: res.unread_count || 0,
+          }));
+        } catch (error) {
+          if (request === notificationRequest.current) update(previous => ({
+            ...previous, error: error instanceof Error ? error.message : 'Không tải được thông báo.',
+          }));
+        } finally {
+          update(previous => ({ ...previous, loading: false }));
+          refreshQueued = false;
+          // Focus/open/events during a request still receive a fresh snapshot afterwards.
+          if (version !== refreshVersion) refresh();
+        }
+      });
+    };
+    const mark = (target: MarkTarget) => {
+      if (!isCurrent() || pending.has(target) || pending.has('all') || (target === 'all' && pending.size > 0)) return;
+      pending.add(target);
+      update(previous => ({ ...previous, pending: [...pending], markError: null }));
+      enqueue(async () => {
+        const request = ++notificationRequest.current;
+        try {
+          if (target === 'all') await notificationService.markAllAsRead(options);
+          else await notificationService.markAsRead(target, options);
+          if (request === notificationRequest.current) update(previous => {
+            const wasUnread = previous.items.some(item => item.id === target && !item.is_read);
+            return { ...previous,
+              items: previous.items.map(item => target === 'all' || item.id === target ? { ...item, is_read: true } : item),
+              unread: target === 'all' ? 0 : Math.max(0, previous.unread - (wasUnread ? 1 : 0)),
+            };
+          });
+        } catch (error) {
+          if (isCurrent() && request === notificationRequest.current) {
+            const text = error instanceof Error ? error.message : 'Không đánh dấu đã đọc được.';
+            update(previous => ({ ...previous, markError: { target, message: text } }));
+            // Item navigation closes the popup; the failure must still be visible.
+            message.error(text);
+          }
+        } finally {
+          pending.delete(target);
+          update(previous => ({ ...previous, pending: [...pending] }));
+          refresh();
+        }
+      });
+    };
+    notificationActions.current = { scope: notificationScope, refresh, mark };
+    refresh();
+    const interval = window.setInterval(refresh, 30000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('crm:notifications-changed', refresh);
+    return () => {
+      controller.abort();
+      notificationRequest.current++;
+      notificationActions.current = null;
+      window.clearInterval(interval);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('crm:notifications-changed', refresh);
+    };
+  }, [notificationScope, token]);
 
-  const handleMarkAsRead = async (id: number, link?: string | null) => {
-    try {
-      await notificationService.markAsRead(id);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
-      );
-      setUnreadCount((prev) => Math.max(0, prev - 1));
-      setNotifOpen(false);
-      if (link) {
-        navigate(link);
-      }
-    } catch {
-      // ignore
-    }
+  const fetchNotifications = () => {
+    if (notificationActions.current?.scope === notificationScope) notificationActions.current.refresh();
   };
-
-  const handleMarkAllAsRead = async () => {
-    try {
-      await notificationService.markAllAsRead();
-      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
-      setUnreadCount(0);
-    } catch {
-      // ignore
-    }
+  const markNotification = (target: MarkTarget) => {
+    if (notificationActions.current?.scope === notificationScope) notificationActions.current.mark(target);
+  };
+  const setNotifOpen = (open: boolean) => setNotificationState(previous =>
+    previous.scope === notificationScope ? { ...previous, open } : previous);
+  const handleMarkAsRead = (notif: NotificationItem) => {
+    if (currentNotificationScope.current !== notificationScope) return;
+    if (!notif.is_read) markNotification(notif.id);
+    setNotifOpen(false);
+    const link = internalNotificationLink(notif.link);
+    if (link) navigate(link);
   };
 
   const getNotifIcon = (type: string) => {
@@ -208,16 +313,22 @@ export function AdminLayout() {
   };
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout className="crm-app" style={{ minHeight: '100vh' }}>
+      {mobile && !collapsed && <button type="button" className="crm-nav-backdrop" aria-label="Đóng menu điều hướng" onClick={() => setCollapsed(true)} />}
       <Sider
+        className="crm-sidebar"
         trigger={null}
         collapsible
         collapsed={collapsed}
         width={248}
-        style={{ overflow: 'auto', height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0 }}
+        breakpoint="md"
+        collapsedWidth={mobile ? 0 : 80}
+        onBreakpoint={broken => { setMobile(broken); setCollapsed(broken); }}
+        style={{ overflow: 'auto', height: '100vh', position: 'fixed', left: 0, top: 0, bottom: 0, zIndex: 40 }}
       >
-        <div className="h-16 flex items-center justify-center border-b border-gray-700">
-          <h1 className="text-white text-lg font-semibold">{collapsed ? 'SE' : 'SmartEdu CRM'}</h1>
+        <div className="crm-brand">
+          <span className="crm-brand-mark"><BookOutlined /></span>
+          {!collapsed && <span className="crm-brand-name">SmartEdu CRM</span>}
         </div>
         <Menu
           theme="dark"
@@ -226,11 +337,11 @@ export function AdminLayout() {
           openKeys={openMenuKeys}
           onOpenChange={setOpenMenuKeys}
           items={menuItems}
-          onClick={({ key }) => navigate(key)}
+          onClick={({ key }) => { navigate(key); if (mobile) setCollapsed(true); }}
         />
       </Sider>
 
-      <Layout style={{ marginLeft: collapsed ? 80 : 248, transition: 'all 0.2s' }}>
+      <Layout className="crm-main-layout" style={{ marginLeft: mobile ? 0 : collapsed ? 80 : 248, transition: 'margin-left 0.2s' }}>
         <Header
           style={{
             padding: '0 20px',
@@ -249,13 +360,8 @@ export function AdminLayout() {
               type="text"
               icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
               onClick={() => setCollapsed(!collapsed)}
+              aria-label={collapsed ? 'Mở menu điều hướng' : 'Thu gọn menu điều hướng'}
               style={{ fontSize: 16 }}
-            />
-            <Input
-              placeholder="Tìm lead, học viên, lớp học..."
-              prefix={<SearchOutlined />}
-              style={{ width: 320 }}
-              className="hidden md:flex"
             />
           </div>
 
@@ -265,6 +371,7 @@ export function AdminLayout() {
               icon={<QuestionCircleOutlined style={{ fontSize: 18 }} />}
               onClick={() => setGuideVisible(true)}
               title="Hướng dẫn sử dụng"
+              aria-label="Hướng dẫn sử dụng"
             />
             <Dropdown
               open={notifOpen}
@@ -291,23 +398,44 @@ export function AdminLayout() {
                         type="link"
                         size="small"
                         className="text-white hover:text-blue-100 p-0 text-xs font-medium"
-                        onClick={handleMarkAllAsRead}
+                        loading={pendingMarks.includes('all')}
+                        disabled={pendingMarks.length > 0}
+                        onClick={() => markNotification('all')}
                       >
                         Đã đọc tất cả
                       </Button>
                     )}
                   </div>
 
+                  {loadingNotifs && (
+                    <div role="status" className="px-4 py-3 text-xs text-gray-500 flex items-center gap-2">
+                      <Spin size="small" /> Đang tải thông báo...
+                    </div>
+                  )}
+                  {notifError && (
+                    <div role="alert" className="px-4 py-2 text-xs text-red-600 bg-red-50 flex items-center justify-between gap-2">
+                      <span>{notifError}</span>
+                      <Button size="small" type="link" disabled={loadingNotifs} onClick={fetchNotifications}>Thử lại</Button>
+                    </div>
+                  )}
+                  {markError && (
+                    <div role="alert" className="px-4 py-2 text-xs text-red-600 bg-red-50 flex items-center justify-between gap-2">
+                      <span>{markError.message}</span>
+                      <Button size="small" type="link" disabled={pendingMarks.length > 0}
+                        onClick={() => markNotification(markError.target)}>Thử lại</Button>
+                    </div>
+                  )}
                   <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
                     {notifications.length === 0 ? (
-                      <div className="p-8 text-center">
+                      !loadingNotifs && !notifError && <div className="p-8 text-center">
                         <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Chưa có thông báo nào" />
                       </div>
                     ) : (
                       notifications.map((notif) => (
                         <div
                           key={notif.id}
-                          onClick={() => handleMarkAsRead(notif.id, notif.link)}
+                          onClick={() => handleMarkAsRead(notif)}
+                          aria-busy={pendingMarks.includes(notif.id) || pendingMarks.includes('all')}
                           className={`p-3.5 hover:bg-gray-50 cursor-pointer transition-colors flex items-start gap-3 ${
                             !notif.is_read ? 'bg-blue-50/50' : ''
                           }`}
@@ -318,7 +446,7 @@ export function AdminLayout() {
                               <span className={`text-xs ${!notif.is_read ? 'font-bold text-gray-900' : 'font-medium text-gray-750'} truncate`}>
                                 {notif.title}
                               </span>
-                              {!notif.is_read && (
+                              {pendingMarks.includes(notif.id) ? <Spin size="small" /> : !notif.is_read && (
                                 <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0" />
                               )}
                             </div>
@@ -337,27 +465,35 @@ export function AdminLayout() {
               )}
             >
               <Badge count={unreadCount} overflowCount={99}>
-                <Button type="text" icon={<BellOutlined style={{ fontSize: 18 }} />} />
+                <Button type="text" aria-label="Mở thông báo" icon={<BellOutlined style={{ fontSize: 18 }} />} />
               </Badge>
             </Dropdown>
             <Dropdown menu={{ items: userMenuItems }} trigger={['click']} placement="bottomRight">
-              <div className="flex cursor-pointer items-center gap-2">
+              <Button type="text" aria-label="Mở menu tài khoản" className="h-auto py-1">
                 <Avatar>{user?.name?.[0] || 'U'}</Avatar>
-                <div className="hidden md:block">
-                  <div className="font-medium leading-5">{user?.name || 'User'}</div>
-                  <div className="text-xs text-gray-500 capitalize">{user?.role || 'guest'}</div>
-                </div>
-              </div>
+                <span className="hidden md:block text-left max-w-48">
+                  <span className="block font-medium leading-5 truncate">{user?.name || 'Tài khoản'}</span>
+                  <span className="block text-xs text-gray-500">{user?.role ? roleLabels[user.role] : 'Tài khoản'}</span>
+                </span>
+              </Button>
             </Dropdown>
           </div>
         </Header>
 
-        <Content style={{ margin: 20, padding: 0, minHeight: 280, background: '#f5f6f8' }}>
+        <Content className="crm-content" style={{ padding: 0, minHeight: 280, background: 'transparent' }}>
           <Outlet />
         </Content>
       </Layout>
 
       <RoleGuide visible={guideVisible} onClose={() => setGuideVisible(false)} role={user?.role || 'admin'} />
+      <Modal title="Thông tin tài khoản" open={accountVisible && !!user} onCancel={() => setAccountVisible(false)}
+        footer={<Button onClick={() => setAccountVisible(false)}>Đóng</Button>} width={480}>
+        <Descriptions bordered column={1} size="small" className="crm-detail-descriptions">
+          <Descriptions.Item label="Họ và tên">{user?.name || 'Chưa có thông tin'}</Descriptions.Item>
+          <Descriptions.Item label="Email">{user?.email || 'Chưa có thông tin'}</Descriptions.Item>
+          <Descriptions.Item label="Vai trò">{user?.role ? roleLabels[user.role] : 'Chưa có thông tin'}</Descriptions.Item>
+        </Descriptions>
+      </Modal>
     </Layout>
   );
 }

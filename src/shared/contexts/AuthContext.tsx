@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
 import { authService } from '@/services/api/auth.service';
+import { clearListCache } from '../../services/api/listCache';
 
 export type UserRole = 'admin' | 'sale' | 'teacher' | 'student';
 
@@ -28,12 +29,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const login = (user: User, token: string) => {
+  clearListCache();
   setUser(user);
   setToken(token);
   localStorage.setItem('token', token);
 };
 
 const logout = () => {
+    clearListCache();
     setUser(null);
     setToken(null);
     localStorage.removeItem('token');
@@ -50,6 +53,7 @@ const logout = () => {
   authService.getMe(savedToken)
   .then((data) => {
     const u = data.data.user;
+    clearListCache();
 
     setUser({
       id: u.id,

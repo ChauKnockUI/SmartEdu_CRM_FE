@@ -1,93 +1,98 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useListLocation } from '../../shared/hooks/useListLocation';
+import { paginationProps } from '../../shared/utils/pagination';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Col, DatePicker, Form, Input, InputNumber, Modal, Row, Select, Space, Statistic, Table, Tag, message, Alert, Typography } from 'antd';
 import { ClockCircleOutlined, PlusOutlined, ReloadOutlined, SearchOutlined, WarningOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { financeService } from '../../services/api/finance.service';
 import { classService } from '../../services/api/class.service';
+import { InvoiceDetailDrawer } from './InvoiceDetailDrawer';
+import { BillingStatusTag, billingStatusMeta as statusMeta, getInvoiceStatus as invoiceStatus, isCollectibleInvoice, sumBillingMoney, billingDate } from './billingStatus';
 
 const money = (value: number) => `${Number(value || 0).toLocaleString('vi-VN')} đ`;
 
-const daysUntil = (date?: string) => {
-  if (!date) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const target = new Date(date);
-  target.setHours(0, 0, 0, 0);
-  return Math.ceil((target.getTime() - today.getTime()) / 86400000);
-};
-
-const invoiceStatus = (invoice: any) => {
-  const remaining = Number(invoice.remaining_amount || 0);
-  const paid = Number(invoice.paid_amount || 0);
-  if (remaining <= 0 || invoice.status === 'paid') return 'paid';
-  const diff = daysUntil(invoice.due_date);
-  if (diff !== null && diff < 0) return 'overdue';
-  if (paid > 0 || invoice.status === 'partial') return 'partial';
-  return 'pending';
-};
-
-const statusMeta: Record<string, { label: string; color: string }> = {
-  pending: { label: 'Chưa thu', color: 'orange' },
-  partial: { label: 'Thu một phần', color: 'blue' },
-  paid: { label: 'Đã thu đủ', color: 'green' },
-  overdue: { label: 'Quá hạn', color: 'red' },
-};
-
 export function InvoicesPage() {
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [detailId, setDetailId] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+  const creatingRef = useRef(false);
+  const templateRequest = useRef(0);
+  const [templateLoading, setTemplateLoading] = useState(false);
+  const [createResult, setCreateResult] = useState<any>(null);
   const [invoices, setInvoices] = useState<any[]>([]);
   const [classes, setClasses] = useState<any[]>([]);
+  const [classesLoading, setClassesLoading] = useState(false);
+  const [classesError, setClassesError] = useState('');
   const [template, setTemplate] = useState<any | null>(null);
   const [selectedStudentIds, setSelectedStudentIds] = useState<number[]>([]);
-  const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('active');
+  const { params, page, pageSize, setPage, choice, update } = useListLocation({ status: 'active' });
+  const query = (params.get('search') || '').slice(0, 200);
+  const statusFilter = choice('status', ['active', 'all', 'overdue', 'partial', 'pending', 'paid', 'cancelled', 'refunded']);
   const [form] = Form.useForm();
+  const extraEnabled = Form.useWatch('extra_item_enabled', form);
+  const extraAmount = Form.useWatch('extra_item_amount', form);
+  const discount = Form.useWatch('discount_amount', form);
 
   const loadInvoices = async () => {
     try {
       setLoading(true);
-      const res = await financeService.getInvoices({ limit: 100 });
+      setLoadError('');
+      const res = await financeService.getAllInvoices();
       setInvoices(res.data || []);
     } catch (err: any) {
-      message.error(err.message || 'Không tải được danh sách khoản phải thu');
+      setInvoices([]); setLoadError(err.message || 'Không tải được danh sách khoản phải thu');
     } finally {
       setLoading(false);
     }
   };
 
   const loadClasses = async () => {
-    const res = await classService.getAll({ limit: 100 });
-    setClasses(res.data || []);
+    setClassesLoading(true); setClassesError('');
+    try {
+      const res = await classService.getAll({ page: 1, limit: 100 });
+      let all = res.data || [];
+      for (let page = 2; page <= (res.pagination?.totalPages || 1); page++) {
+        const next = await classService.getAll({ page, limit: 100 });
+        all = all.concat(next.data || []);
+      }
+      setClasses(all);
+    } catch (err: any) { setClasses([]); setClassesError(err.message || 'Không tải được danh sách lớp'); }
+    finally { setClassesLoading(false); }
   };
 
   useEffect(() => {
     loadInvoices();
-    loadClasses().catch(() => undefined);
+    loadClasses();
   }, []);
 
   const handleClassChange = async (classId: number) => {
+    const request = ++templateRequest.current;
+    setTemplateLoading(true);
     form.setFieldsValue({ student_ids: [] });
     setSelectedStudentIds([]);
     setTemplate(null);
     try {
       const res = await financeService.getClassFeeTemplate(classId);
+      if (request !== templateRequest.current) return;
       setTemplate(res.data);
     } catch (err: any) {
-      message.error(err.message || 'Không tải được cấu hình phí của lớp');
-    }
+      if (request === templateRequest.current) message.error(err.message || 'Không tải được cấu hình phí của lớp');
+    } finally { if (request === templateRequest.current) setTemplateLoading(false); }
   };
 
   const templateTotal = useMemo(
     () => (template?.items || []).reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0),
     [template]
   );
+  const totalFee = Math.round((templateTotal + (extraEnabled ? Number(extraAmount || 0) : 0)) * 100) / 100;
 
   const rows = useMemo(() => invoices
     .map((invoice) => ({ ...invoice, view_status: invoiceStatus(invoice) }))
     .filter((invoice) => {
-      if (statusFilter === 'active') return invoice.view_status !== 'paid';
+      if (statusFilter === 'active') return isCollectibleInvoice(invoice);
       if (statusFilter === 'all') return true;
       return invoice.view_status === statusFilter;
     })
@@ -102,23 +107,30 @@ export function InvoicesPage() {
       return haystack.includes(query.trim().toLowerCase());
     })
     .sort((a, b) => {
-      const rank = { overdue: 0, partial: 1, pending: 2, paid: 3 } as Record<string, number>;
+      const rank = { overdue: 0, partial: 1, pending: 2, paid: 3, cancelled: 4, refunded: 5, unknown: 6 } as Record<string, number>;
       const priority = rank[a.view_status] - rank[b.view_status];
       if (priority !== 0) return priority;
       return new Date(a.due_date || '2999-01-01').getTime() - new Date(b.due_date || '2999-01-01').getTime();
     }), [invoices, query, statusFilter]);
 
+  useEffect(() => {
+    const last = Math.max(1, Math.ceil(rows.length / pageSize));
+    if (!loading && !loadError && page > last) setPage(last);
+  }, [rows.length, page, pageSize, loading, loadError]);
+
   const summary = useMemo(() => {
-    const active = invoices.filter((item) => invoiceStatus(item) !== 'paid');
+    const active = invoices.filter(isCollectibleInvoice);
     return {
-      activeAmount: active.reduce((sum, item) => sum + Number(item.remaining_amount || 0), 0),
-      overdueAmount: active.filter((item) => invoiceStatus(item) === 'overdue').reduce((sum, item) => sum + Number(item.remaining_amount || 0), 0),
+      activeAmount: sumBillingMoney(active, 'remaining_amount'),
+      overdueAmount: sumBillingMoney(active.filter(item => invoiceStatus(item) === 'overdue'), 'remaining_amount'),
       partialCount: active.filter((item) => invoiceStatus(item) === 'partial').length,
       paidCount: invoices.filter((item) => invoiceStatus(item) === 'paid').length,
     };
   }, [invoices]);
 
   const submitCreate = async () => {
+    if (creatingRef.current || templateLoading || !template) return;
+    creatingRef.current = true; setCreating(true);
     try {
       const values = await form.validateFields();
       const studentIds = Array.isArray(values.student_ids)
@@ -152,16 +164,19 @@ export function InvoicesPage() {
           })
         : await financeService.createInvoicesForClass(payload);
 
-      const skipped = res.data?.skipped?.length || 0;
-      message.success(skipped ? `Đã tạo invoice, bỏ qua ${skipped} học viên đã có invoice` : 'Đã tạo invoice');
+      const skipped = res.data?.skipped || [];
+      const created = res.data?.created?.length ?? 1;
+      setCreateResult(skipped.length ? { created, skipped } : null);
+      if (skipped.length) message.warning(`Đã tạo ${created} khoản thu; ${skipped.length} học viên chưa được tạo. Xem lý do bên dưới.`);
+      else message.success(`Đã tạo ${created} khoản phải thu`);
       setCreateOpen(false);
       form.resetFields();
       setTemplate(null);
       setSelectedStudentIds([]);
       loadInvoices();
     } catch (err: any) {
-      message.error(err.message || 'Tạo khoản phải thu thất bại');
-    }
+      if (!err.errorFields) message.error(err.message || 'Tạo khoản phải thu thất bại');
+    } finally { creatingRef.current = false; setCreating(false); }
   };
 
   const columns: ColumnsType<any> = [
@@ -171,8 +186,7 @@ export function InvoicesPage() {
       render: (_, record) => {
         if (record.view_status === 'overdue') return <Tag color="red" icon={<WarningOutlined />}>Quá hạn</Tag>;
         if (record.view_status === 'partial') return <Tag color="blue" icon={<ClockCircleOutlined />}>Còn thiếu</Tag>;
-        if (record.view_status === 'paid') return <Tag color="green">Đã thu</Tag>;
-        return <Tag color="orange">Chưa thu</Tag>;
+        return <BillingStatusTag status={record.view_status} />;
       },
     },
     {
@@ -186,7 +200,7 @@ export function InvoicesPage() {
       ),
     },
     {
-      title: 'Lớp / Invoice',
+      title: 'Lớp / Khoản phải thu',
       width: 240,
       render: (_, record) => (
         <Space direction="vertical" size={0}>
@@ -195,32 +209,37 @@ export function InvoicesPage() {
         </Space>
       ),
     },
-    { title: 'Phải thu', dataIndex: 'total_amount', align: 'right', render: money },
-    { title: 'Đã thu', dataIndex: 'paid_amount', align: 'right', render: money },
-    { title: 'Còn lại', dataIndex: 'remaining_amount', align: 'right', render: (value) => <Typography.Text strong>{money(value)}</Typography.Text> },
-    { title: 'Hạn thu', dataIndex: 'due_date', render: (value) => value ? new Date(value).toLocaleDateString('vi-VN') : '-' },
-    { title: 'Trạng thái', render: (_, record) => <Tag color={statusMeta[record.view_status].color}>{statusMeta[record.view_status].label}</Tag> },
+    { title: 'Phải thu sau giảm giá', dataIndex: 'payable_amount', width: 160, className: 'crm-money-cell', align: 'right', render: money },
+    { title: 'Đã thu', dataIndex: 'paid_amount', width: 145, className: 'crm-money-cell', align: 'right', render: money },
+    { title: 'Còn lại', dataIndex: 'remaining_amount', width: 145, className: 'crm-money-cell', align: 'right', render: (value) => <Typography.Text strong>{money(value)}</Typography.Text> },
+    { title: 'Hạn thu', dataIndex: 'due_date', render: billingDate },
+    { title: 'Trạng thái', render: (_, record) => <BillingStatusTag status={record.view_status} /> },
+    { title: '', render: (_, record) => <Button type="link" onClick={() => setDetailId(record.id)}>Chi tiết</Button> },
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Khoản phải thu"
         breadcrumbs={[
           { title: 'Dashboard', href: '/dashboard' },
           { title: 'Tài chính' },
-          { title: 'Invoices' },
+          { title: 'Khoản phải thu' },
         ]}
         actions={
           <Space>
             <Button icon={<ReloadOutlined />} onClick={loadInvoices}>Tải lại</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>Tạo invoice theo lớp</Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>Tạo khoản phải thu theo lớp</Button>
           </Space>
         }
       />
 
+      {loadError && <Alert className="mb-4" type="error" showIcon message={loadError} />}
+      {createResult && <Alert className="mb-4" type="warning" showIcon closable onClose={() => setCreateResult(null)}
+        message={`Đã tạo ${createResult.created} khoản thu; ${createResult.skipped.length} học viên chưa được tạo`}
+        description={<ul>{createResult.skipped.map((item: any) => <li key={item.student_id}>{item.student_name || `#${item.student_id}`}: {item.reason}</li>)}</ul>} />}
       <Card>
-        <Row gutter={16} className="mb-4">
+        {!loadError && <Row gutter={[16, 16]} className="mb-4">
           <Col xs={24} sm={12} lg={6}>
             <Card size="small"><Statistic title="Đang phải thu" value={summary.activeAmount} formatter={(value) => money(Number(value))} /></Card>
           </Col>
@@ -228,32 +247,35 @@ export function InvoicesPage() {
             <Card size="small"><Statistic title="Quá hạn" value={summary.overdueAmount} valueStyle={{ color: '#cf1322' }} formatter={(value) => money(Number(value))} /></Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="Thu một phần" value={summary.partialCount} /></Card>
+            <Card size="small"><Statistic title={statusMeta.partial.label} value={summary.partialCount} /></Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card size="small"><Statistic title="Đã thu đủ" value={summary.paidCount} /></Card>
+            <Card size="small"><Statistic title={statusMeta.paid.label} value={summary.paidCount} /></Card>
           </Col>
-        </Row>
+        </Row>}
 
-        <Space className="mb-4 w-full" size={12} wrap>
+        <Space className="crm-filter-controls mb-4 w-full" size={12} wrap>
           <Input
             allowClear
             prefix={<SearchOutlined />}
-            placeholder="Tìm học viên, SĐT, email, lớp, invoice"
+            aria-label="Tìm theo học viên, số điện thoại, email, lớp hoặc mã khoản thu"
+            placeholder="Học viên, SĐT, email, lớp, mã thu"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            style={{ width: 360 }}
+            onChange={event => update({ search: event.target.value }, true, true)}
+            className="crm-filter-search"
           />
           <Select
             value={statusFilter}
-            onChange={setStatusFilter}
-            style={{ width: 200 }}
+            onChange={status => update({ status })}
+            className="crm-filter-status"
             options={[
               { label: 'Đang phải thu', value: 'active' },
               { label: 'Quá hạn', value: 'overdue' },
-              { label: 'Thu một phần', value: 'partial' },
-              { label: 'Chưa thu', value: 'pending' },
-              { label: 'Đã thu đủ', value: 'paid' },
+              { label: statusMeta.partial.label, value: 'partial' },
+              { label: statusMeta.pending.label, value: 'pending' },
+              { label: statusMeta.paid.label, value: 'paid' },
+              { label: statusMeta.cancelled.label, value: 'cancelled' },
+              { label: statusMeta.refunded.label, value: 'refunded' },
               { label: 'Tất cả', value: 'all' },
             ]}
           />
@@ -264,22 +286,30 @@ export function InvoicesPage() {
           rowKey="id"
           columns={columns}
           dataSource={rows}
+          locale={{ emptyText: loadError ? 'Chưa tải được khoản phải thu' : 'Không có khoản phải thu phù hợp' }}
           scroll={{ x: 1120 }}
-          pagination={{ pageSize: 12, showTotal: (total) => `${total} khoản phải thu` }}
+          pagination={paginationProps('khoản phải thu', { current: page, pageSize, onChange: (next, size) => setPage(size === pageSize ? next : 1, size) })}
         />
       </Card>
+
+      <InvoiceDetailDrawer invoiceId={detailId} onClose={() => setDetailId(null)} onChanged={loadInvoices} />
 
       <Modal
         title="Tạo khoản phải thu theo lớp"
         open={createOpen}
         width={760}
-        onCancel={() => setCreateOpen(false)}
+        onCancel={() => { templateRequest.current++; setTemplateLoading(false); setCreateOpen(false); form.resetFields(); setTemplate(null); setSelectedStudentIds([]); }}
         onOk={submitCreate}
-        okText="Tạo invoice"
+        confirmLoading={creating}
+        okButtonProps={{ disabled: !template || templateLoading }}
+        cancelButtonProps={{ disabled: creating }} closable={!creating} maskClosable={!creating} keyboard={!creating}
+        okText="Tạo khoản phải thu"
       >
-        <Form form={form} layout="vertical" initialValues={{ mode: 'all', discount_amount: 0, extra_item_type: 'material' }}>
+        <Form form={form} disabled={creating} layout="vertical" initialValues={{ mode: 'all', discount_amount: 0, extra_item_type: 'material' }}>
+          {classesError && <Alert className="mb-4" type="error" message={classesError} action={<Button loading={classesLoading} onClick={loadClasses}>Thử lại</Button>} />}
           <Form.Item name="class_id" label="Lớp" rules={[{ required: true }]}>
             <Select
+              loading={classesLoading}
               showSearch
               placeholder="Chọn lớp"
               optionFilterProp="label"
@@ -291,12 +321,13 @@ export function InvoicesPage() {
             />
           </Form.Item>
 
+          {templateLoading && <Typography.Paragraph type="secondary">Đang tải mẫu phí…</Typography.Paragraph>}
           {template && (
             <Alert
               className="mb-4"
               type="info"
               showIcon
-              message={`Mẫu phí: ${money(templateTotal)} cho ${template.students?.length || 0} học viên đang active`}
+              message={`Mẫu phí: ${money(templateTotal)} cho ${template.students?.length || 0} học viên đang ghi danh`}
               description={
                 <Space direction="vertical" size={2}>
                   {(template.items || []).map((item: any, index: number) => (
@@ -307,10 +338,11 @@ export function InvoicesPage() {
             />
           )}
 
-          <Form.Item name="mode" label="Phạm vi tạo invoice" rules={[{ required: true }]}>
+          <Form.Item name="mode" label="Phạm vi tạo khoản phải thu" rules={[{ required: true }]}>
             <Select
+              onChange={() => { form.setFieldValue('student_ids', undefined); setSelectedStudentIds([]); }}
               options={[
-                { label: 'Tất cả học viên active trong lớp', value: 'all' },
+                { label: 'Tất cả học viên đang ghi danh trong lớp', value: 'all' },
                 { label: 'Chọn nhiều học viên', value: 'selected' },
                 { label: 'Một học viên', value: 'single' },
               ]}
@@ -326,7 +358,7 @@ export function InvoicesPage() {
                 <Form.Item
                   name="student_ids"
                   label="Học viên"
-                  rules={[{ required: true, message: 'Chọn học viên cần tạo invoice' }]}
+                  rules={[{ required: true, message: 'Chọn học viên cần tạo khoản phải thu' }]}
                 >
                   <Select
                     mode={mode === 'single' ? undefined : 'multiple'}
@@ -347,8 +379,9 @@ export function InvoicesPage() {
             <Form.Item name="due_date" label="Hạn thu" className="flex-1">
               <DatePicker className="w-full" />
             </Form.Item>
-            <Form.Item name="discount_amount" label="Giảm giá" className="flex-1">
-              <InputNumber min={0} className="w-full" />
+            <Form.Item name="discount_amount" label="Giảm giá" className="flex-1" dependencies={['extra_item_enabled', 'extra_item_amount', 'class_id']}
+              rules={[{ type: 'number', min: 0, max: totalFee, message: 'Giảm giá không được vượt tổng các khoản phí.' }]}>
+              <InputNumber min={0} max={totalFee} precision={2} className="w-full" />
             </Form.Item>
           </Space>
 
@@ -375,15 +408,16 @@ export function InvoicesPage() {
                   />
                 </Form.Item>
                 <Form.Item name="extra_item_description" label="Mô tả phí thêm" rules={[{ required: true }]}>
-                  <Input />
+                  <Input maxLength={255} />
                 </Form.Item>
                 <Form.Item name="extra_item_amount" label="Số tiền phí thêm" rules={[{ required: true }]}>
-                  <InputNumber min={1} className="w-full" />
+                  <InputNumber min={0.01} precision={2} className="w-full" />
                 </Form.Item>
               </Space>
             ) : null}
           </Form.Item>
 
+          {template && <Typography.Paragraph>Phải thu mỗi học viên sau giảm giá: <strong>{money(Math.max(totalFee - Number(discount || 0), 0))}</strong></Typography.Paragraph>}
           <Form.Item name="notes" label="Ghi chú">
             <Input.TextArea rows={3} />
           </Form.Item>

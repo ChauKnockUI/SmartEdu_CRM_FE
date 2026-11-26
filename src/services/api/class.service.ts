@@ -1,6 +1,12 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
+
+export interface ClassFilterOptions {
+  courses: { id: number; name: string; is_active?: boolean; total_sessions?: number | null }[];
+  teachers: { id: number; full_name: string }[];
+}
 
 const getAuthHeader = () => {
   const token = localStorage.getItem('token');
@@ -13,6 +19,18 @@ const getAuthHeader = () => {
 };
 
 export const classService = {
+  getFilterOptions: async (): Promise<{ data: ClassFilterOptions }> => {
+    const res = await apiFetch(`${config.baseURL}/classes/filter-options`, { headers: getAuthHeader() });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Không tải được bộ lọc lớp học');
+    return json;
+  },
+  getDropoutAlerts: async (classId?: number) => {
+    const res = await apiFetch(`${config.baseURL}/classes/dropout-alerts${classId ? `?class_id=${classId}` : ''}`, { headers: getAuthHeader() });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.message || 'Không tải được cảnh báo bỏ học');
+    return json;
+  },
   getAll: async (params?: {
     page?: number;
     limit?: number;
@@ -20,11 +38,15 @@ export const classService = {
     status?: string;
     course_id?: number;
     teacher_id?: number;
+    unassigned_teacher?: boolean;
     room_id?: number;
   }) => {
-    const query = new URLSearchParams(params as any).toString();
+    const query = new URLSearchParams();
+    Object.entries(params || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+    });
 
-    const res = await fetch(`${config.baseURL}/classes?${query}`, {
+    const res = await apiFetch(`${config.baseURL}/classes?${query.toString()}`, {
       headers: getAuthHeader(),
     });
 
@@ -35,7 +57,7 @@ export const classService = {
   },
 
   getMyClasses: async () => {
-    const res = await fetch(`${config.baseURL}/classes/my/classes`, {
+    const res = await apiFetch(`${config.baseURL}/classes/my/classes`, {
       headers: getAuthHeader(),
     });
 
@@ -46,7 +68,7 @@ export const classService = {
   },
 
   getById: async (id: number) => {
-    const res = await fetch(`${config.baseURL}/classes/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/classes/${id}`, {
       headers: getAuthHeader(),
     });
 
@@ -57,7 +79,7 @@ export const classService = {
   },
 
   create: async (data: any) => {
-    const res = await fetch(`${config.baseURL}/classes`, {
+    const res = await apiFetch(`${config.baseURL}/classes`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -70,7 +92,7 @@ export const classService = {
   },
 
   update: async (id: number, data: any) => {
-    const res = await fetch(`${config.baseURL}/classes/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/classes/${id}`, {
       method: 'PUT',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -83,7 +105,7 @@ export const classService = {
   },
 
   remove: async (id: number) => {
-    const res = await fetch(`${config.baseURL}/classes/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/classes/${id}`, {
       method: 'DELETE',
       headers: getAuthHeader(),
     });
@@ -94,13 +116,14 @@ export const classService = {
     return json;
   },
 
-  checkConflicts: async (classId: number, studentIds: number[]) => {
-    const res = await fetch(`${config.baseURL}/classes/${classId}/check-conflicts`, {
+  checkConflicts: async (classId: number, studentIds: number[], signal?: AbortSignal) => {
+    const res = await apiFetch(`${config.baseURL}/classes/${classId}/check-conflicts`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify({
         student_ids: studentIds,
       }),
+      signal,
     });
     const json = await res.json();
     if (!res.ok) throw new Error(json.message || 'Không thể kiểm tra xung đột lịch học');
@@ -108,7 +131,7 @@ export const classService = {
   },
 
   enrollStudents: async (classId: number, studentIds: number[], allowConflicts: boolean = false) => {
-    const res = await fetch(`${config.baseURL}/classes/${classId}/enroll`, {
+    const res = await apiFetch(`${config.baseURL}/classes/${classId}/enroll`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify({
@@ -127,7 +150,7 @@ export const classService = {
   },
 
   unenrollStudent: async (classId: number, studentId: number) => {
-    const res = await fetch(`${config.baseURL}/classes/${classId}/enroll/${studentId}`, {
+    const res = await apiFetch(`${config.baseURL}/classes/${classId}/enroll/${studentId}`, {
       method: 'DELETE',
       headers: getAuthHeader(),
     });
@@ -142,7 +165,7 @@ export const classService = {
   },
 
   scoreDropoutRisk: async (classId: number) => {
-    const res = await fetch(`${config.baseURL}/classes/${classId}/dropout-risk/score`, {
+    const res = await apiFetch(`${config.baseURL}/classes/${classId}/dropout-risk/score`, {
       method: 'POST',
       headers: getAuthHeader(),
     });
@@ -156,7 +179,7 @@ export const classService = {
     return json;
   },
   getDropoutRisk: async (classId: number) => {
-    const res = await fetch(`${config.baseURL}/classes/${classId}/dropout-risk`, { headers: getAuthHeader() });
+    const res = await apiFetch(`${config.baseURL}/classes/${classId}/dropout-risk`, { headers: getAuthHeader() });
     const json = await res.json();
     if (!res.ok) throw new Error(json.message || 'Không tải được kết quả đánh giá');
     return json;

@@ -1,16 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useListLocation } from '../../shared/hooks/useListLocation';
+import { paginationProps } from '../../shared/utils/pagination';
+import { useEffect, useRef, useState } from 'react';
 import {
-  Table, Tag, Button, Space, Modal, Badge, Card,
-  Form, Input, Select, message, Popconfirm
+  Table, Tag, Button, Space, Modal, Card,
+  Form, Input, Select, message, Popconfirm, Alert
 } from 'antd';
 import {
   PlusOutlined, CalendarOutlined, EditOutlined,
-  KeyOutlined, StopOutlined, CheckCircleOutlined
+  KeyOutlined, StopOutlined, CheckCircleOutlined, ReloadOutlined
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { PageHeader } from '../../shared/components/PageHeader';
 import { teacherService } from '@/services/api/teacher.service';
 import { usePermissions } from '../../shared/hooks/usePermissions';
+import { useAuth } from '../../shared/contexts/AuthContext';
+import { useSearchInput } from '../../shared/hooks/useSearchInput';
+import { clearListCache } from '../../services/api/listCache';
+import { confirmDiscardChanges, formSnapshot } from '../../shared/utils/formChanges';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
@@ -35,16 +41,37 @@ const formatTime = (value?: string | Date | null) => {
 
 export function TeachersPage() {
   const { can } = usePermissions();
+  const { user } = useAuth();
+  const identity = `${user?.id}:${user?.role}`;
+  const latestIdentity = useRef(identity); latestIdentity.current = identity;
+  const listRequest = useRef(0);
+  const [dataOwner, setDataOwner] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const { params, page, pageSize, setPage, choice, update } = useListLocation({ status: 'active' });
+  const [total, setTotal] = useState(0);
+  const pagination = { page, limit: pageSize, total };
   const canWrite = can('teachers', 'write');
 
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchText, setSearchText] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('active');
+  const searchText = (params.get('search') || '').slice(0, 200);
+  const statusFilter = choice('status', ['active', 'inactive', 'all']);
+  const { searchDraft, setSearchDraft, submitSearch } = useSearchInput(searchText, search => {
+    update({ search }, true, true);
+  });
 
   const [form] = Form.useForm();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
+  const original = useRef('');
+  const saveBusy = useRef(false), alive = useRef(false);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const closeModal = () => {
+    if (!saveBusy.current) confirmDiscardChanges(formSnapshot(form.getFieldsValue(true)) !== original.current, () => {
+      if (alive.current && identity === latestIdentity.current && !saveBusy.current) setModalOpen(false);
+    });
+  };
 
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [selectedTeacher, setSelectedTeacher] = useState<Teacher | null>(null);
@@ -53,36 +80,52 @@ export function TeachersPage() {
 
   useEffect(() => {
     fetchTeachers();
-  }, [searchText, statusFilter]);
+    return () => { listRequest.current++; };
+  }, [searchText, statusFilter, pagination.page, pagination.limit, identity]);
 
   const fetchTeachers = async () => {
+    const request = ++listRequest.current;
     try {
       setLoading(true);
+      setLoadError('');
       const res = await teacherService.getAll({
+        page: pagination.page, limit: pagination.limit,
         search: searchText || undefined,
         is_active:
           statusFilter === 'all'
             ? undefined
             : statusFilter === 'active',
       });
-      setTeachers(res.data || []);
+      if (request !== listRequest.current || identity !== latestIdentity.current) return;
+      const total = res.pagination?.total || 0;
+      const lastPage = Math.max(1, Math.ceil(total / pagination.limit));
+      if (pagination.page > lastPage) { setPage(lastPage); return; }
+      setTeachers(res.data || []); setDataOwner(identity);
+      setTotal(total);
     } catch (err: any) {
-      console.error(err);
-      message.error(err.message || 'Không thể tải danh sách giảng viên');
+      if (request !== listRequest.current || identity !== latestIdentity.current) return;
+      setTeachers([]); setDataOwner(identity); setTotal(0);
+      setLoadError(err.message || 'Không thể tải danh sách giảng viên');
     } finally {
-      setLoading(false);
+      if (request === listRequest.current && identity === latestIdentity.current) setLoading(false);
     }
   };
 
+  const refresh = () => { clearListCache(); fetchTeachers(); };
+
   const openCreateModal = () => {
+    if (saveBusy.current) return;
     setEditingTeacher(null);
     form.resetFields();
     form.setFieldsValue({ type: 'full_time', is_active: true });
+    original.current = formSnapshot(form.getFieldsValue(true));
     setModalOpen(true);
   };
 
   const openEditModal = (teacher: Teacher) => {
+    if (saveBusy.current) return;
     setEditingTeacher(teacher);
+    form.resetFields();
     form.setFieldsValue({
       full_name: teacher.full_name,
       email: teacher.email,
@@ -91,18 +134,25 @@ export function TeachersPage() {
       specialization: teacher.specialization,
       is_active: teacher.is_active,
     });
+    original.current = formSnapshot(form.getFieldsValue(true));
     setModalOpen(true);
   };
 
   const handleSave = async () => {
+    if (saveBusy.current || !canWrite) return;
+    saveBusy.current = true; setSaving(true);
     try {
-      const values = await form.validateFields();
+      let values;
+      try { values = await form.validateFields(); } catch { return; }
+      if (!alive.current || identity !== latestIdentity.current) return;
 
       if (editingTeacher) {
         await teacherService.update(editingTeacher.id, values);
+        if (!alive.current || identity !== latestIdentity.current) return;
         message.success('Cập nhật giảng viên thành công');
       } else {
         const res = await teacherService.create(values);
+        if (!alive.current || identity !== latestIdentity.current) return;
         message.success('Tạo giảng viên thành công');
 
         if (res.temp_password) {
@@ -122,8 +172,10 @@ export function TeachersPage() {
       form.resetFields();
       fetchTeachers();
     } catch (err: any) {
-      console.error(err);
-      message.error(err.message || 'Lưu giảng viên thất bại');
+      if (alive.current && identity === latestIdentity.current) message.error(err.message || 'Lưu giảng viên thất bại');
+    } finally {
+      saveBusy.current = false;
+      if (alive.current) setSaving(false);
     }
   };
 
@@ -346,7 +398,7 @@ export function TeachersPage() {
   ];
 
   return (
-    <div>
+    <div className="crm-page">
       <PageHeader
         title="Quản lý Giảng viên"
         breadcrumbs={[
@@ -355,53 +407,58 @@ export function TeachersPage() {
           { title: 'Giảng viên' },
         ]}
         actions={
-          canWrite && (
+          <><Button icon={<ReloadOutlined />} loading={loading} onClick={refresh}>Tải lại</Button>{canWrite && (
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
               Thêm giảng viên
             </Button>
-          )
+          )}</>
         }
       />
 
       <Card>
-        <div className="mb-4 flex gap-4">
+        <div className="crm-filter-controls mb-4">
           <Input.Search
             placeholder="Tìm tên, email, điện thoại..."
-            value={searchText}
-            onChange={(event) => setSearchText(event.target.value)}
+            aria-label="Tìm giảng viên" value={searchDraft}
+            onChange={(event) => setSearchDraft(event.target.value)} onSearch={submitSearch}
             allowClear
-            style={{ width: 320 }}
+            className="crm-filter-search"
           />
 
-          <Select value={statusFilter} onChange={setStatusFilter} style={{ width: 180 }}>
+          <Select aria-label="Trạng thái giảng viên" value={statusFilter} className="crm-filter-status" onChange={value => {
+            update({ status: value });
+          }}>
             <Select.Option value="active">Đang hoạt động</Select.Option>
             <Select.Option value="inactive">Ngưng hoạt động</Select.Option>
             <Select.Option value="all">Tất cả</Select.Option>
           </Select>
         </div>
 
+        {loadError && <Alert className="mb-4" type="error" showIcon message={loadError}
+          action={<Button onClick={refresh}>Thử lại</Button>} />}
         <Table
           columns={columns}
-          dataSource={teachers}
+          dataSource={dataOwner === identity ? teachers : []}
           rowKey="id"
           loading={loading}
-          pagination={{
-            pageSize: 10,
-            showTotal: (total) => `Tổng ${total} giảng viên`,
-          }}
+          scroll={{ x: 1050 }}
+          pagination={paginationProps('giảng viên', { current: pagination.page, pageSize: pagination.limit,
+            total: dataOwner === identity ? pagination.total : 0,
+            onChange: (page, limit) => setPage(limit === pageSize ? page : 1, limit) })}
         />
       </Card>
 
       <Modal
         title={editingTeacher ? 'Cập nhật giảng viên' : 'Thêm giảng viên'}
-        open={modalOpen}
+        open={modalOpen && canWrite} forceRender
         onOk={handleSave}
-        onCancel={() => setModalOpen(false)}
+        onCancel={closeModal}
+        confirmLoading={saving} closable={!saving} maskClosable={!saving} keyboard={!saving}
+        cancelButtonProps={{ disabled: saving }}
         okText="Lưu"
         cancelText="Hủy"
-        destroyOnHidden
       >
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" disabled={saving}>
           <Form.Item name="full_name" label="Tên giảng viên" rules={[{ required: true }]}>
             <Input />
           </Form.Item>

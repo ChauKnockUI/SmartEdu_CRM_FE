@@ -14,23 +14,27 @@ interface PageHeaderProps {
   back?: boolean;
 }
 
-export function PageHeader({ title, breadcrumbs, actions, back }: PageHeaderProps) {
+export function PageHeader({ title, breadcrumbs, description, actions, back }: PageHeaderProps) {
   const location = useLocation();
   const { goBack } = useDetailNavigation();
   const showBack = back ?? isDetailPath(location.pathname);
   return (
-    <div className="bg-white p-6 rounded-lg mb-6 shadow-sm">
-      {breadcrumbs && breadcrumbs.length > 0 && (
-        <Breadcrumb items={breadcrumbs} className="mb-2" itemRender={item => item.href
-          ? <Link to={item.href}>{item.title}</Link> : item.title} />
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          {showBack && <Button type="text" icon={<ArrowLeftOutlined />} onClick={goBack} aria-label="Quay lại trang trước" title="Quay lại trang trước" />}
-          {title && <h1 className="text-2xl font-bold m-0">{title}</h1>}
+    <header className="crm-page-header">
+      <div className="crm-page-header-copy">
+        {breadcrumbs && breadcrumbs.length > 0 && (
+          <Breadcrumb items={breadcrumbs} className="mb-2" itemRender={item => {
+            const label = item.href === '/dashboard' || item.title === 'Dashboard' ? 'Tổng quan'
+              : item.title === 'LMS' ? 'Đào tạo' : item.title;
+            return item.href ? <Link to={item.href}>{label}</Link> : label;
+          }} />
+        )}
+        <div className="crm-page-heading">
+          {showBack && <Button type="text" icon={<ArrowLeftOutlined />} onClick={goBack} aria-label="Quay lại trang trước" title="Quay lại trang trước">{!title ? 'Quay lại' : null}</Button>}
+          {title && <h1>{title}</h1>}
         </div>
-        {actions && <div className="flex gap-2">{actions}</div>}
+        {description && <p className="crm-page-description">{description}</p>}
       </div>
-    </div>
+      {actions && <div className="crm-page-header-actions">{actions}</div>}
+    </header>
   );
 }

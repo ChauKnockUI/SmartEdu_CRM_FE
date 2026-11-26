@@ -1,3 +1,4 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
 
 const config = getApiConfig();
@@ -27,7 +28,7 @@ export const teacherService = {
     if (params?.type) query.append('type', params.type);
     if (params?.is_active !== undefined) query.append('is_active', String(params.is_active));
 
-    const res = await fetch(`${config.baseURL}/teachers?${query.toString()}`, {
+    const res = await apiFetch(`${config.baseURL}/teachers?${query.toString()}`, {
       headers: getAuthHeader(),
     });
 
@@ -38,7 +39,7 @@ export const teacherService = {
   },
 
   getById: async (id: number) => {
-    const res = await fetch(`${config.baseURL}/teachers/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/teachers/${id}`, {
       headers: getAuthHeader(),
     });
 
@@ -49,7 +50,7 @@ export const teacherService = {
   },
 
   create: async (data: any) => {
-    const res = await fetch(`${config.baseURL}/teachers`, {
+    const res = await apiFetch(`${config.baseURL}/teachers`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -62,7 +63,7 @@ export const teacherService = {
   },
 
   update: async (id: number, data: any) => {
-    const res = await fetch(`${config.baseURL}/teachers/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/teachers/${id}`, {
       method: 'PUT',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -75,7 +76,7 @@ export const teacherService = {
   },
 
   remove: async (id: number) => {
-    const res = await fetch(`${config.baseURL}/teachers/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/teachers/${id}`, {
       method: 'DELETE',
       headers: getAuthHeader(),
     });
@@ -87,7 +88,7 @@ export const teacherService = {
   },
 
   resetPassword: async (id: number) => {
-    const res = await fetch(`${config.baseURL}/teachers/${id}/reset-password`, {
+    const res = await apiFetch(`${config.baseURL}/teachers/${id}/reset-password`, {
       method: 'POST',
       headers: getAuthHeader(),
     });
@@ -103,7 +104,7 @@ export const teacherService = {
     if (params?.start_date) query.append('start_date', params.start_date);
     if (params?.end_date) query.append('end_date', params.end_date);
 
-    const res = await fetch(`${config.baseURL}/teachers/${id}/schedule?${query.toString()}`, {
+    const res = await apiFetch(`${config.baseURL}/teachers/${id}/schedule?${query.toString()}`, {
       headers: getAuthHeader(),
     });
 

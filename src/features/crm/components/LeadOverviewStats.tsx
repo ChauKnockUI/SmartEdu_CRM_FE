@@ -5,7 +5,7 @@ export function LeadOverviewStats({ data, loading = false, manager = false }: { 
   const rate = summary.totalLeads ? Math.round(summary.enrolledCount / summary.totalLeads * 1000) / 10 : 0;
   const cards = [
     { title: 'Đang chăm sóc', value: summary.activePipelineCount, color: '#1677ff', note: manager ? `${summary.unassignedCount || 0} lead chưa phân công` : 'Lead chưa đăng ký hoặc kết thúc' },
-    { title: 'Cần liên hệ lại', value: summary.staleLeadsCount, color: '#d48806', note: 'Chưa liên hệ hoặc đã quá 3 ngày' },
+    { title: 'Cần chăm sóc', value: summary.staleLeadsCount, color: '#d48806', note: 'Chưa liên hệ hoặc đã quá 3 ngày' },
     { title: 'Đã đăng ký', value: summary.enrolledCount, color: '#389e0d', note: 'Theo giai đoạn CRM đã ghi nhận' },
     { title: 'Tỷ lệ đăng ký', value: rate, color: '#262626', note: 'Đã đăng ký / tổng lead theo bộ lọc', suffix: '%' },
   ];

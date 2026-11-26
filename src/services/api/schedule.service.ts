@@ -1,4 +1,28 @@
+import { apiFetch } from './listCache';
 import { getApiConfig } from './apiConfig';
+
+export interface ScheduleChange {
+  isMakeup?: boolean;
+  canCancel: boolean;
+  canMakeup: boolean;
+  pendingMakeup: boolean;
+  history: {
+    action: 'cancel' | 'makeup';
+    date: string;
+    start_time: string | null;
+    end_time: string | null;
+    reason: string;
+    at: string;
+  }[];
+}
+
+export interface MakeupSchedulePayload {
+  date: string;
+  start_time: string;
+  end_time: string;
+  reason: string;
+  room_id?: number;
+}
 
 const config = getApiConfig();
 
@@ -9,6 +33,30 @@ const getAuthHeader = () => ({
 });
 
 export const scheduleService = {
+  cancel: async (id: number, payload: { reason: string }, signal?: AbortSignal) => {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}/cancel`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify(payload),
+      signal,
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.message || 'Không thể ghi nhận buổi nghỉ.');
+    return json;
+  },
+
+  makeup: async (id: number, payload: MakeupSchedulePayload, signal?: AbortSignal) => {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}/makeup`, {
+      method: 'POST',
+      headers: getAuthHeader(),
+      body: JSON.stringify(payload),
+      signal,
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) throw new Error(json.message || 'Không thể xếp lịch học bù.');
+    return json;
+  },
+
   getAll: async (params?: {
     start_date?: string;
     end_date?: string;
@@ -28,7 +76,7 @@ export const scheduleService = {
     const queryString = query.toString();
     const url = queryString ? `${config.baseURL}/schedules?${queryString}` : `${config.baseURL}/schedules`;
 
-    const res = await fetch(url, {
+    const res = await apiFetch(url, {
       headers: getAuthHeader(),
     });
 
@@ -39,7 +87,7 @@ export const scheduleService = {
   },
 
   getMySchedules: async () => {
-    const res = await fetch(`${config.baseURL}/schedules/my/schedules`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/my/schedules`, {
       headers: getAuthHeader(),
     });
 
@@ -50,7 +98,7 @@ export const scheduleService = {
   },
 
   getByClass: async (classId: number) => {
-    const res = await fetch(`${config.baseURL}/schedules/class/${classId}`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/class/${classId}`, {
       headers: getAuthHeader(),
     });
 
@@ -61,7 +109,7 @@ export const scheduleService = {
   },
 
   create: async (data: any) => {
-    const res = await fetch(`${config.baseURL}/schedules`, {
+    const res = await apiFetch(`${config.baseURL}/schedules`, {
       method: 'POST',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -74,7 +122,7 @@ export const scheduleService = {
   },
 
   update: async (id: number, data: any) => {
-    const res = await fetch(`${config.baseURL}/schedules/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}`, {
       method: 'PUT',
       headers: getAuthHeader(),
       body: JSON.stringify(data),
@@ -87,7 +135,7 @@ export const scheduleService = {
   },
 
   remove: async (id: number) => {
-    const res = await fetch(`${config.baseURL}/schedules/${id}`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${id}`, {
       method: 'DELETE',
       headers: getAuthHeader(),
     });
@@ -99,7 +147,7 @@ export const scheduleService = {
   },
 
   remindAttendance: async (scheduleId: number) => {
-    const res = await fetch(`${config.baseURL}/schedules/${scheduleId}/remind-attendance`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/${scheduleId}/remind-attendance`, {
       method: 'POST',
       headers: getAuthHeader(),
     });
@@ -111,7 +159,7 @@ export const scheduleService = {
   },
 
   remindAllOverdue: async () => {
-    const res = await fetch(`${config.baseURL}/schedules/remind-overdue`, {
+    const res = await apiFetch(`${config.baseURL}/schedules/remind-overdue`, {
       method: 'POST',
       headers: getAuthHeader(),
     });
@@ -121,4 +169,4 @@ export const scheduleService = {
 
     return json;
   },
-};
+};
